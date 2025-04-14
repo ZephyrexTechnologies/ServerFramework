@@ -40,7 +40,7 @@ python src/scripts/create_extension_migration.py my_extension --skip-migrate
 If you see circular dependency errors like:
 
 ```
-WARNING:root:Circular dependency detected involving database.DB_Agents
+WARNING:root:Circular dependency detected involving database.DB_Auth
 ```
 
 Follow these steps to fix them:

@@ -750,7 +750,7 @@ def can_manage_permissions(user_id, resource_type, resource_id, db):
     model_class = None
 
     # Common database module paths
-    db_modules = ["database.DB_Auth", "database.DB_Agents", "database.DB_Providers"]
+    db_modules = ["database.DB_Auth", "database.DB_Providers"]
 
     for module_name in db_modules:
         try:

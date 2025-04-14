@@ -4,8 +4,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from database.DB_Agents import Agent
-
 # Import database models and base
 from database.DB_Auth import Role, Team, User, UserTeam
 from database.DB_Providers import Provider, ProviderInstance
@@ -165,13 +163,3 @@ def test_provider_instance(db_session, test_provider, test_user):
     db_session.add(instance)
     db_session.commit()
     return instance
-
-
-@pytest.fixture
-def test_agent(db_session, test_user):
-    """Create a test agent."""
-    agent_id = str(uuid.uuid4())
-    agent = Agent(id=agent_id, name="Test Agent", user_id=test_user.id, favourite=False)
-    db_session.add(agent)
-    db_session.commit()
-    return agent
