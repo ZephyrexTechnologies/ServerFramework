@@ -978,18 +978,18 @@ class TestInvitationEndpoints(AbstractEndpointTest):
 
     # Skip specific tests that aren't applicable
     skip_tests = [
-        {
-            "name": "test_POST_201_batch",
-            "reason": "Invitation endpoint does not support batch operations",
-        },
-        {
-            "name": "test_POST_422_batch",
-            "reason": "Invitation endpoint does not support batch operations",
-        },
-        {
-            "name": "test_POST_200_search",
-            "reason": "Invitation endpoint does not support search",
-        },
+        SkippedTest(
+            name="test_POST_201_batch",
+            reason="Invitation endpoint does not support batch operations",
+        ),
+        SkippedTest(
+            name="test_POST_422_batch",
+            reason="Invitation endpoint does not support batch operations",
+        ),
+        SkippedTest(
+            name="test_POST_200_search",
+            reason="Invitation endpoint does not support search",
+        ),
     ]
 
     def create_payload(self, name=None, parent_ids=None, team_id=None):

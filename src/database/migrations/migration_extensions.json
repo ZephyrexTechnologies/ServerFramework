@@ -1,7 +1,5 @@
 {
-    "extensions": [
-        "prompts"
-    ],
+    "extensions": [],
     "auto_discover": false,
     "_comments": {
         "extensions": "List of extensions to manage migrations for",

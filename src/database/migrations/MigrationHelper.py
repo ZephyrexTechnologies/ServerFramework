@@ -356,8 +356,8 @@ def find_extension_migrations_dirs():
             continue
 
         # Check if this is an extension directory (should have __init__.py)
-        if not (ext_dir / "__init__.py").exists():
-            continue
+        # if not (ext_dir / "__init__.py").exists():
+        #     continue
 
         # Get extension name
         extension_name = ext_dir.name
@@ -401,9 +401,9 @@ def ensure_versions_directory():
             versions_dir.mkdir(parents=True, exist_ok=True)
 
             # Create an empty __init__.py file in the versions directory
-            init_file = versions_dir / "__init__.py"
-            init_file.touch()
-            logging.info(f"Created {init_file}")
+            # init_file = versions_dir / "__init__.py"
+            # init_file.touch()
+            # logging.info(f"Created {init_file}")
 
         return True
     except Exception as e:
@@ -440,8 +440,8 @@ def ensure_extension_versions_directory(extension_name):
         logging.info(f"Created versions directory at {versions_dir}")
 
     # Create __init__.py files to make the directories packages
-    (migrations_dir / "__init__.py").touch(exist_ok=True)
-    (versions_dir / "__init__.py").touch(exist_ok=True)
+    # (migrations_dir / "__init__.py").touch(exist_ok=True)
+    # (versions_dir / "__init__.py").touch(exist_ok=True)
 
     # Create script.py.mako template in migrations directory if it doesn't exist
     script_template = migrations_dir / "script.py.mako"
@@ -590,7 +590,7 @@ def check_alembic_setup():
             )
             try:
                 versions_dir.mkdir(exist_ok=True)
-                (versions_dir / "__init__.py").touch(exist_ok=True)
+                # (versions_dir / "__init__.py").touch(exist_ok=True)
                 logging.info(f"Created versions directory at {versions_dir}")
             except Exception as e:
                 logging.error(f"Failed to create versions directory: {e}")
@@ -1026,7 +1026,7 @@ def create_minimal_alembic_config(paths):
     # Ensure versions directory exists
     if not versions_dir.exists():
         versions_dir.mkdir(parents=True, exist_ok=True)
-        (versions_dir / "__init__.py").touch(exist_ok=True)
+        # (versions_dir / "__init__.py").touch(exist_ok=True)
         logging.info(f"Created versions directory at {versions_dir}")
 
     # Create a minimal alembic.ini file

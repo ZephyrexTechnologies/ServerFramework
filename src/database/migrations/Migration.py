@@ -83,7 +83,7 @@ def find_alembic_ini():
     potential_paths = [
         paths["root_dir"] / "alembic.ini",  # Standard location
         Path("alembic.ini"),  # Current directory
-        Path("/zephyrex/alembic.ini"),  # Docker location
+        Path("/aginfrastructure/alembic.ini"),  # Docker location
         Path("../alembic.ini"),  # One level up
     ]
 
@@ -299,18 +299,18 @@ def ensure_extension_migrations_dir(extension_name):
         versions_dir.mkdir()
         logging.info(f"Created versions directory at {versions_dir}")
 
-    # Create __init__.py file in migrations directory if it doesn't exist
-    init_file = migrations_dir / "__init__.py"
-    if not init_file.exists():
-        with open(init_file, "w") as f:
-            f.write("# Migrations package for extension\n")
-        logging.info(f"Created __init__.py at {init_file}")
+    # # Create __init__.py file in migrations directory if it doesn't exist
+    # init_file = migrations_dir / "__init__.py"
+    # if not init_file.exists():
+    #     with open(init_file, "w") as f:
+    #         f.write("# Migrations package for extension\n")
+    #     logging.info(f"Created __init__.py at {init_file}")
 
-    # Create __init__.py file in versions directory if it doesn't exist
-    versions_init = versions_dir / "__init__.py"
-    if not versions_init.exists():
-        versions_init.touch(exist_ok=True)
-        logging.info(f"Created __init__.py at {versions_init}")
+    # # Create __init__.py file in versions directory if it doesn't exist
+    # versions_init = versions_dir / "__init__.py"
+    # if not versions_init.exists():
+    #     versions_init.touch(exist_ok=True)
+    #     logging.info(f"Created __init__.py at {versions_init}")
 
     # Create script.py.mako template in migrations directory if it doesn't exist
     script_template = migrations_dir / "script.py.mako"
@@ -334,9 +334,39 @@ def ensure_extension_migrations_dir(extension_name):
                 with open(paths["migrations_dir"] / "env.py", "r") as src, open(
                     env_file, "w"
                 ) as dst:
-                    dst.write(src.read())
-            else:
-                os.symlink(paths["migrations_dir"] / "env.py", env_file)
+                    dst.write(
+                        """
+import os
+import sys
+
+# Get the directory where this file is located
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the extension root directory (parent of migrations)
+extension_dir = os.path.abspath(os.path.join(current_dir, ".."))
+# Get the extensions directory (parent of this extension)
+extensions_dir = os.path.abspath(os.path.join(extension_dir, ".."))
+# Get src directory (parent of extensions)
+src_dir = os.path.abspath(os.path.join(extensions_dir, ".."))
+# Get root directory (parent of src)
+root_dir = os.path.abspath(os.path.join(src_dir, ".."))
+
+# Get the extension name (name of the directory)
+extension_name = os.path.basename(extension_dir)
+os.environ["ALEMBIC_EXTENSION"] = extension_name
+
+# Add to Python path
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+# Import the main migration environment module
+sys.path.insert(0, os.path.join(src_dir, "database", "migrations"))
+from env import *
+                              """
+                    )
+            # else:
+            #     os.symlink(paths["migrations_dir"] / "env.py", env_file)
             logging.info(f"Created env.py at {env_file}")
         except Exception as e:
             logging.error(f"Error creating env.py symlink: {e}")

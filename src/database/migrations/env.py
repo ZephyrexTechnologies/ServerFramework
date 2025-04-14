@@ -6,8 +6,6 @@ import sys
 from logging.config import fileConfig
 from pathlib import Path
 
-from lib.Environment import env
-
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +50,8 @@ from alembic import context
 
 # Now we can import SQLAlchemy and Alembic
 from sqlalchemy import engine_from_config, pool
+
+from lib.Environment import env
 
 
 # Get environment variables for database configuration

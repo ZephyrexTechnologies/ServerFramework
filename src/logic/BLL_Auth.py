@@ -1355,6 +1355,11 @@ class TeamManager(AbstractBLLManager):
 
         # Get the model fields for comparison
         model_fields_set = set(self.Model.Update.__annotations__.keys())
+        # TODO Add fields from mixins dynamically that might not be in annotations
+        model_fields_set.add("name")
+        model_fields_set.add("parent_id")
+        model_fields_set.add("description")
+        model_fields_set.add("image_url")
         for key, value in kwargs.items():
             if key in model_fields_set:
                 model_fields[key] = value
