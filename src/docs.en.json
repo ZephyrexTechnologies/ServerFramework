@@ -1,0 +1,788 @@
+{
+    "extensions": {
+        "Extension": {
+            "meta": {
+                "singular": "Extension",
+                "plural": "Extensions",
+                "comment": "An Extension represents a third-party integration. This is SEPARATE from an oauth link."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Extension name"
+                },
+                "description": {
+                    "column_name": "description",
+                    "comment": "Extension description"
+                }
+            },
+            "endpoints": {}
+        },
+        "Ability": {
+            "meta": {
+                "singular": "Ability",
+                "plural": "Abilities",
+                "comment": "An Ability represents something an Agent can *do* with an Extension."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Ability name"
+                },
+                "extension_id": {
+                    "column_name": "extension_id",
+                    "comment": "Reference to the associated Extension"
+                }
+            },
+            "endpoints": {}
+        }
+    },
+    "providers": {
+        "Provider": {
+            "meta": {
+                "singular": "Provider",
+                "plural": "Providers",
+                "comment": "A Provider represents an external provder of data or functionality. If extension_id is null, it represents an AI provider. If it is not, it represents an extension provider. Settings should exclude model name and api key, as those are stored in provider instance as fields."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Provider name"
+                },
+                "agent_settings_json": {
+                    "column_name": "agent_settings_json",
+                    "comment": "JSON string containing provider settings"
+                }
+            },
+            "endpoints": {}
+        },
+        "ProviderExtension": {
+            "meta": {
+                "singular": "Provider Extension",
+                "plural": "Provider Extensions",
+                "comment": "A ProviderExtension represents a Provider and Extension combination."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "provider_id": {
+                    "column_name": "provider_id",
+                    "comment": "Reference to the Provider"
+                },
+                "extension_id": {
+                    "column_name": "extension_id",
+                    "comment": "Reference to the Extension"
+                }
+            },
+            "endpoints": {}
+        },
+        "ProviderExtensionAbility": {
+            "meta": {
+                "singular": "Provider Extension Ability",
+                "plural": "Provider Extension Abilities",
+                "comment": "A ProviderExtensionAbility represents a ProviderExtension and Ability combination. This allows for a provider to provide partial functionality to an extension, for example SendGrid only provides sending email, but not an inbox."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "provider_extension_id": {
+                    "column_name": "provider_extension_id",
+                    "comment": "Reference to the ProviderExtension"
+                },
+                "ability_id": {
+                    "column_name": "ability_id",
+                    "comment": "Reference to the Ability"
+                }
+            },
+            "endpoints": {}
+        },
+        "ProviderInstance": {
+            "meta": {
+                "singular": "Provider Instance",
+                "plural": "Provider Instances",
+                "comment": "A ProviderInstance represents a User or Team's instance of a Provider. They can have multiple of the same Provider."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Instance name"
+                },
+                "provider_id": {
+                    "column_name": "provider_id",
+                    "comment": "Reference to the Provider"
+                },
+                "model_name": {
+                    "column_name": "model_name",
+                    "comment": "Model name for AI providers"
+                },
+                "api_key": {
+                    "column_name": "api_key",
+                    "comment": "API key for the provider"
+                }
+            },
+            "endpoints": {}
+        },
+        "ProviderInstanceUsage": {
+            "meta": {
+                "singular": "Provider Instance Usage",
+                "plural": "Provider Instance Usages",
+                "comment": "A ProviderInstanceUsage represents a User's usage of a provider. If team_id is also populated, it was used on behalf of a team by a user (through a team agent). Lack of a record means a user has never used the ProviderInstance. Note that ProviderInstances lower on a rotation may be seldom/never used."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "provider_instance_id": {
+                    "column_name": "provider_instance_id",
+                    "comment": "Reference to the ProviderInstance"
+                },
+                "input_tokens": {
+                    "column_name": "input_tokens",
+                    "comment": "Number of input tokens used"
+                },
+                "output_tokens": {
+                    "column_name": "output_tokens",
+                    "comment": "Number of output tokens generated"
+                }
+            },
+            "endpoints": {}
+        },
+        "ProviderInstanceSetting": {
+            "meta": {
+                "singular": "Provider Instance Setting",
+                "plural": "Provider Instance Settings",
+                "comment": "A ProviderInstanceSetting represents a non-default configuration setting for a User or Team's instance of an Provider."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "provider_instance_id": {
+                    "column_name": "provider_instance_id",
+                    "comment": "Reference to the ProviderInstance"
+                },
+                "key": {
+                    "column_name": "key",
+                    "comment": "Setting key"
+                },
+                "value": {
+                    "column_name": "value",
+                    "comment": "Setting value"
+                }
+            },
+            "endpoints": {}
+        },
+        "ExtensionInstanceAbility": {
+            "meta": {
+                "singular": "Extension Instance Ability",
+                "plural": "Extension Instance Abilities",
+                "comment": "An ExtensionInstanceAbility represents whether an ability is enabled for that ExtensionInstance. Forced abilities are always enabled downstream (Companies can force all Users and their Agents within Team Scope to use them, and Users can force their own Agents to use them). Nonpresence of a record is equivalent to state=False, forced=False."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "provider_instance_id": {
+                    "column_name": "provider_instance_id",
+                    "comment": "Reference to the ProviderInstance"
+                },
+                "command_id": {
+                    "column_name": "command_id",
+                    "comment": "Reference to the Ability"
+                },
+                "state": {
+                    "column_name": "state",
+                    "comment": "Whether the ability is enabled"
+                },
+                "forced": {
+                    "column_name": "forced",
+                    "comment": "Whether the ability state is forced"
+                }
+            },
+            "endpoints": {}
+        },
+        "Rotation": {
+            "meta": {
+                "singular": "Rotation",
+                "plural": "Rotations",
+                "comment": "A Rotation represents a collection of Providers to be used by one or more Agents. All Agents interface with Providers through a Rotation."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Rotation name"
+                },
+                "description": {
+                    "column_name": "description",
+                    "comment": "Rotation description"
+                }
+            },
+            "endpoints": {}
+        },
+        "RotationProviderInstance": {
+            "meta": {
+                "singular": "Rotation Provider Instance",
+                "plural": "Rotation Provider Instances",
+                "comment": "A RotationProviderInstance represents a link between a Rotation and a ProviderInstance. Order is determined by record parentage (NULL parent is first)."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "rotation_id": {
+                    "column_name": "rotation_id",
+                    "comment": "Reference to the Rotation"
+                },
+                "provider_instance_id": {
+                    "column_name": "provider_instance_id",
+                    "comment": "Reference to the ProviderInstance"
+                },
+                "parent_id": {
+                    "column_name": "parent_id",
+                    "comment": "Reference to the parent record for ordering"
+                }
+            },
+            "endpoints": {}
+        }
+    },
+    "auth": {
+        "User": {
+            "meta": {
+                "singular": "User",
+                "plural": "Users",
+                "comment": "Represents a user of the system with authentication details."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "email": {
+                    "column_name": "email",
+                    "comment": "User email address"
+                },
+                "username": {
+                    "column_name": "username",
+                    "comment": "Optional username"
+                },
+                "display_name": {
+                    "column_name": "display_name",
+                    "comment": "User display name"
+                },
+                "first_name": {
+                    "column_name": "first_name",
+                    "comment": "User first name"
+                },
+                "last_name": {
+                    "column_name": "last_name",
+                    "comment": "User last name"
+                },
+                "mfa_count": {
+                    "column_name": "mfa_count",
+                    "comment": "Number of MFA methods required"
+                },
+                "active": {
+                    "column_name": "active",
+                    "comment": "Whether the user account is active"
+                }
+            },
+            "endpoints": {}
+        },
+        "PaymentPortal": {
+            "meta": {
+                "singular": "Payment Portal",
+                "plural": "Payment Portals",
+                "comment": "Represents a payment gateway for processing subscriptions and payments."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Portal name"
+                },
+                "description": {
+                    "column_name": "description",
+                    "comment": "Portal description"
+                }
+            },
+            "endpoints": {}
+        },
+        "UserPaymentPortal": {
+            "meta": {
+                "singular": "User Payment Portal",
+                "plural": "User Payment Portals",
+                "comment": "Associates a user with a payment portal and their customer ID."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "payment_portal_id": {
+                    "column_name": "payment_portal_id",
+                    "comment": "Reference to the PaymentPortal"
+                },
+                "customer_id": {
+                    "column_name": "customer_id",
+                    "comment": "Customer ID in the payment system"
+                }
+            },
+            "endpoints": {}
+        },
+        "TeamPaymentPortal": {
+            "meta": {
+                "singular": "Team Payment Portal",
+                "plural": "Team Payment Portals",
+                "comment": "Associates a team with a payment portal and their customer ID."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User who manages this portal"
+                },
+                "payment_portal_id": {
+                    "column_name": "payment_portal_id",
+                    "comment": "Reference to the PaymentPortal"
+                },
+                "customer_id": {
+                    "column_name": "customer_id",
+                    "comment": "Customer ID in the payment system"
+                }
+            },
+            "endpoints": {}
+        },
+        "UserCredential": {
+            "meta": {
+                "singular": "User Credential",
+                "plural": "User Credentials",
+                "comment": "Stores user password hashes and authentication info."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "password_hash": {
+                    "column_name": "password_hash",
+                    "comment": "Hashed password"
+                },
+                "password_salt": {
+                    "column_name": "password_salt",
+                    "comment": "Salt used for password hashing"
+                },
+                "password_changed": {
+                    "column_name": "password_changed",
+                    "comment": "When password was last changed"
+                }
+            },
+            "endpoints": {}
+        },
+        "UserRecoveryQuestion": {
+            "meta": {
+                "singular": "User Recovery Question",
+                "plural": "User Recovery Questions",
+                "comment": "Security questions for account recovery."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "question": {
+                    "column_name": "question",
+                    "comment": "Recovery question text"
+                },
+                "answer": {
+                    "column_name": "answer",
+                    "comment": "Hashed answer to the question"
+                }
+            },
+            "endpoints": {}
+        },
+        "Team": {
+            "meta": {
+                "singular": "Team",
+                "plural": "Teams",
+                "comment": "Represents a team of users with shared resources."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Team name"
+                },
+                "description": {
+                    "column_name": "description",
+                    "comment": "Team description"
+                },
+                "encryption_key": {
+                    "column_name": "encryption_key",
+                    "comment": "Encryption key for team data"
+                },
+                "token": {
+                    "column_name": "token",
+                    "comment": "API token for team access"
+                },
+                "training_data": {
+                    "column_name": "training_data",
+                    "comment": "Custom training data for team models"
+                }
+            },
+            "endpoints": {}
+        },
+        "TeamMetadata": {
+            "meta": {
+                "singular": "Team Metadata",
+                "plural": "Team Metadata",
+                "comment": "Key-value metadata associated with a team."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "team_id": {
+                    "column_name": "team_id",
+                    "comment": "Reference to the Team"
+                },
+                "key": {
+                    "column_name": "key",
+                    "comment": "Metadata key"
+                },
+                "value": {
+                    "column_name": "value",
+                    "comment": "Metadata value"
+                }
+            },
+            "endpoints": {}
+        },
+        "Role": {
+            "meta": {
+                "singular": "Role",
+                "plural": "Roles",
+                "comment": "Defines access levels and permissions within a team."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "team_id": {
+                    "column_name": "team_id",
+                    "comment": "Reference to the Team"
+                },
+                "name": {
+                    "column_name": "name",
+                    "comment": "Role identifier (user, admin, superadmin)"
+                },
+                "friendly_name": {
+                    "column_name": "friendly_name",
+                    "comment": "Human-readable role name"
+                },
+                "mfa_count": {
+                    "column_name": "mfa_count",
+                    "comment": "Number of MFA methods required for this role"
+                },
+                "password_change_frequency_days": {
+                    "column_name": "password_change_frequency_days",
+                    "comment": "How often password must be changed"
+                }
+            },
+            "endpoints": {}
+        },
+        "UserTeam": {
+            "meta": {
+                "singular": "User Team",
+                "plural": "User Teams",
+                "comment": "Associates users with teams and their roles."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "team_id": {
+                    "column_name": "team_id",
+                    "comment": "Reference to the Team"
+                },
+                "role_id": {
+                    "column_name": "role_id",
+                    "comment": "Reference to the Role"
+                },
+                "enabled": {
+                    "column_name": "enabled",
+                    "comment": "Whether user membership is active"
+                }
+            },
+            "endpoints": {}
+        },
+        "Invitation": {
+            "meta": {
+                "singular": "Invitation",
+                "plural": "Invitations",
+                "comment": "Represents an invitation to join a team."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "team_id": {
+                    "column_name": "team_id",
+                    "comment": "Reference to the Team"
+                },
+                "code": {
+                    "column_name": "code",
+                    "comment": "Invitation code"
+                },
+                "role_id": {
+                    "column_name": "role_id",
+                    "comment": "Reference to the Role being granted"
+                },
+                "inviter_id": {
+                    "column_name": "inviter_id",
+                    "comment": "Reference to the User who created the invitation"
+                }
+            },
+            "endpoints": {}
+        },
+        "InvitationInvitee": {
+            "meta": {
+                "singular": "Invitation Invitee",
+                "plural": "Invitation Invitees",
+                "comment": "Tracks the status of a specific invitation sent to an email."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "email": {
+                    "column_name": "email",
+                    "comment": "Invitee email address"
+                },
+                "is_accepted": {
+                    "column_name": "is_accepted",
+                    "comment": "Whether invitation has been accepted"
+                },
+                "accepted_at": {
+                    "column_name": "accepted_at",
+                    "comment": "When the invitation was accepted"
+                },
+                "invitation_id": {
+                    "column_name": "invitation_id",
+                    "comment": "Reference to the Invitation"
+                },
+                "invitee_user_id": {
+                    "column_name": "invitee_user_id",
+                    "comment": "Reference to the User who accepted the invitation"
+                }
+            },
+            "endpoints": {}
+        },
+        "UserMetadata": {
+            "meta": {
+                "singular": "User Metadata",
+                "plural": "User Metadata",
+                "comment": "Key-value metadata associated with a user."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "key": {
+                    "column_name": "key",
+                    "comment": "Metadata key"
+                },
+                "value": {
+                    "column_name": "value",
+                    "comment": "Metadata value"
+                }
+            },
+            "endpoints": {}
+        },
+        "FailedLoginAttempt": {
+            "meta": {
+                "singular": "Failed Login Attempt",
+                "plural": "Failed Login Attempts",
+                "comment": "Records unsuccessful login attempts for security monitoring."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "ip_address": {
+                    "column_name": "ip_address",
+                    "comment": "IP address of the attempt"
+                }
+            },
+            "endpoints": {}
+        },
+        "Notification": {
+            "meta": {
+                "singular": "Notification",
+                "plural": "Notifications",
+                "comment": "System and user notifications with various scoping options (user, team, user-team, or global)."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "title": {
+                    "column_name": "title",
+                    "comment": "Notification title"
+                },
+                "content": {
+                    "column_name": "content",
+                    "comment": "Notification content"
+                },
+                "reference_type": {
+                    "column_name": "reference_type",
+                    "comment": "Type of referenced entity"
+                },
+                "reference_id": {
+                    "column_name": "reference_id",
+                    "comment": "ID of the referenced entity"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to a specific User (optional)"
+                },
+                "team_id": {
+                    "column_name": "team_id",
+                    "comment": "Reference to a specific Team (optional)"
+                }
+            },
+            "endpoints": {}
+        },
+        "NotificationReference": {
+            "meta": {
+                "singular": "Notification Reference",
+                "plural": "Notification References",
+                "comment": "References to specific entities related to a notification."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "notification_id": {
+                    "column_name": "notification_id",
+                    "comment": "Reference to the Notification"
+                },
+                "reference_type": {
+                    "column_name": "reference_type",
+                    "comment": "Type of referenced entity"
+                },
+                "reference_id": {
+                    "column_name": "reference_id",
+                    "comment": "ID of the referenced entity"
+                }
+            },
+            "endpoints": {}
+        },
+        "UserNotification": {
+            "meta": {
+                "singular": "User Notification",
+                "plural": "User Notifications",
+                "comment": "Tracks which users have read or acknowledged which notifications."
+            },
+            "properties": {
+                "id": {
+                    "column_name": "id",
+                    "comment": "Unique identifier"
+                },
+                "user_id": {
+                    "column_name": "user_id",
+                    "comment": "Reference to the User"
+                },
+                "notification_id": {
+                    "column_name": "notification_id",
+                    "comment": "Reference to the Notification"
+                },
+                "read": {
+                    "column_name": "read",
+                    "comment": "Whether the notification has been read"
+                },
+                "read_at": {
+                    "column_name": "read_at",
+                    "comment": "When the notification was read"
+                },
+                "acknowledged": {
+                    "column_name": "acknowledged",
+                    "comment": "Whether the notification has been acknowledged"
+                },
+                "acknowledged_at": {
+                    "column_name": "acknowledged_at",
+                    "comment": "When the notification was acknowledged"
+                }
+            },
+            "endpoints": {}
+        }
+    }
+}

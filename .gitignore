@@ -1,0 +1,10 @@
+**/.vscode
+**/__pycache__
+**/models
+**/*.env*
+**/*.db
+**/recording.wav
+**/.venv
+**/.pytest_cache
+**/workspace
+.obsidian/workspace.json

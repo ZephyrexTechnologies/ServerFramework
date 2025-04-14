@@ -1,0 +1,10 @@
+{
+    "id": "hide-empty-folders",
+    "name": "Hide Empty Folders",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Automatically hides folders that don't contain any .md files",
+    "author": "Jameson Grieve",
+    "authorUrl": "https://github.com/jamesonrgrieve",
+    "isDesktopOnly": false
+}

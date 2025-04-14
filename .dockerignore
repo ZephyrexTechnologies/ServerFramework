@@ -1,0 +1,24 @@
+# Development directories
+.env
+.git
+.github
+.vscode/
+.pytest_cache/
+node_modules/
+WORKSPACE/
+tests/
+docs/
+# Python cache (using ** to catch nested directories)
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+# Configuration and documentation
+*.md
+book.json
+docker-compose*.yml
+pyproject.toml
+pytest.ini
+MANIFEST.in
+package-lock.json
+start.py
+setup.py

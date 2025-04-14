@@ -1,0 +1,12 @@
+name: Build and Test
+on: ["push"]
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+  test-pytest:
+    needs: [lint]
+    uses: ./.github/workflows/test-pytest.yml
+    permissions:
+      contents: read
+    with:
+      test-folders: '["database", "logic"]' # endpoints won't work until SDK self-calls are gone, and SDK also requires the test server.

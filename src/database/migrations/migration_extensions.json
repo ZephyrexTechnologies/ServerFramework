@@ -1,0 +1,12 @@
+{
+    "extensions": [
+        "prompts"
+    ],
+    "auto_discover": false,
+    "_comments": {
+        "extensions": "List of extensions to manage migrations for",
+        "auto_discover": "When true, discover all extensions in src/extensions with migrations",
+        "usage": "Set environment variable OVERRIDE_EXTENSION_LIST to a JSON array of extension names to override this list",
+        "notes": "Each extension should have its DB_* files in the extension directory, and migrations/versions/ for its migrations"
+    }
+}
