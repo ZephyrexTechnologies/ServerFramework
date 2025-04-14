@@ -4,17 +4,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+app_name = "Zephyrex"
+
 default_values = {
-    "APP_NAME": "Zephyrex",
+    "APP_NAME": app_name,
     "ROOT_API_KEY": "n0ne",
     "SERVER_URI": "http://localhost:1996",
     "ALLOWED_DOMAINS": "*",
     "DATABASE_TYPE": "sqlite",
-    "DATABASE_NAME": "zephyrex",
+    "DATABASE_NAME": app_name.lower(),
     "DATABASE_SSL": "disable",
     "DATABASE_HOST": "localhost",
     "DATABASE_PORT": "5432",
-    "DATABASE_USER": "zephyrex",
+    "DATABASE_USER": app_name.lower(),
     "DATABASE_PASSWORD": "Password1!",
     "LOCALIZATION": "en",
     "GRAPHIQL": "true",
