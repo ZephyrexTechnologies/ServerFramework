@@ -1,6 +1,6 @@
 import inspect
 import logging
-from datetime import combine, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from fastapi import HTTPException
@@ -483,9 +483,9 @@ class AbstractBLLManager:
                     if isinstance(field.type, (date, datetime)):
                         on_date = value["on"]  # This is expected to be a date object
                         # Create datetime objects for start and end of the day using the datetime module
-                        start_of_day = combine(on_date, time.min)
+                        start_of_day = datetime.combine(on_date, time.min)
                         # Use start of the *next* day for the upper bound (exclusive)
-                        start_of_next_day = combine(
+                        start_of_next_day = datetime.combine(
                             on_date + timedelta(days=1), time.min
                         )
                         conditions.append(
