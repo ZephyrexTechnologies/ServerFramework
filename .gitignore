@@ -1,4 +1,3 @@
-**/.vscode
 **/__pycache__
 **/models
 **/*.env*
@@ -8,3 +7,8 @@
 **/.pytest_cache
 **/workspace
 .obsidian/workspace.json
+**/.idea
+**/logs
+*.sh
+non*.txt
+prompt

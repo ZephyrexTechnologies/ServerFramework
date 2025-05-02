@@ -2,9 +2,13 @@ import uuid
 
 import pytest
 
-from endpoints.AbstractEPTest import AbstractEndpointTest, ParentEntity
+from AbstractTest import ParentEntity
+from endpoints.AbstractEPTest import AbstractEndpointTest
+from endpoints.EP_Providers_test import TestProviderEndpoints
 
 
+@pytest.mark.ep
+@pytest.mark.extension
 class ProviderExtensionEndpointTest(AbstractEndpointTest):
     """Test class for Provider Extension endpoints."""
 
@@ -21,20 +25,27 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
     ]
 
     # Parent entity configurations
-    parent_entities = [ParentEntity(name="provider", key="provider_id", is_path=False)]
+    parent_entities = [
+        ParentEntity(
+            name="provider",
+            foreign_key="provider_id",
+            is_path=False,
+            test_class=TestProviderEndpoints,
+        )
+    ]
 
-    def create_parent_entities(self, server, jwt_a, team_a):
+    def create_parent_entities(self, server, admin_a_jwt, team_a):
         """Create parent entities required for testing this resource."""
         # Create a provider to use for extension testing
         provider_payload = {"name": f"Test Provider {uuid.uuid4()}"}
 
         if team_a and "team_id" in provider_payload:
-            provider_payload["team_id"] = team_a.get("id", None)
+            provider_payload["team_id"] = team_a.id
 
         nested_payload = {"provider": provider_payload}
 
         response = server.post(
-            "/v1/provider", json=nested_payload, headers=self._auth_header(jwt_a)
+            "/v1/provider", json=nested_payload, headers=self._auth_header(admin_a_jwt)
         )
 
         assert response.status_code == 201
@@ -42,13 +53,13 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return {"provider": provider}
 
-    def test_GET_200_available_extensions(self, server, jwt_a, team_a):
+    def test_GET_200_available_extensions(self, server, admin_a_jwt, team_a):
         """Test listing available extensions."""
-        if self.should_skip_test("test_GET_200_available_extensions"):
+        if self.reason_to_skip("test_GET_200_available_extensions"):
             return
 
         response = server.get(
-            "/v1/provider/extension/available", headers=self._auth_header(jwt_a)
+            "/v1/provider/extension/available", headers=self._auth_header(admin_a_jwt)
         )
 
         self._assert_response_status(
@@ -73,19 +84,19 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return json_response["extensions"]
 
-    def test_GET_200_provider_extensions(self, server, jwt_a, team_a):
+    def test_GET_200_provider_extensions(self, server, admin_a_jwt, team_a):
         """Test getting extensions for a specific provider."""
-        if self.should_skip_test("test_GET_200_provider_extensions"):
+        if self.reason_to_skip("test_GET_200_provider_extensions"):
             return
 
         # First create a provider
-        parent_entities = self.create_parent_entities(server, jwt_a, team_a)
+        parent_entities = self.create_parent_entities(server, admin_a_jwt, team_a)
         provider = parent_entities["provider"]
 
         # Then get extensions for this provider
         response = server.get(
             f"/v1/provider/extension/provider/{provider['id']}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -104,7 +115,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         # Also test with status filter
         response_with_filter = server.get(
             f"/v1/provider/extension/provider/{provider['id']}?status=enabled",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -124,16 +135,16 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return json_response["extensions"]
 
-    def test_POST_200_install_extension(self, server, jwt_a, team_a):
+    def test_POST_200_install_extension(self, server, admin_a_jwt, team_a):
         """Test installing an extension."""
-        if self.should_skip_test("test_POST_200_install_extension"):
+        if self.reason_to_skip("test_POST_200_install_extension"):
             return
 
         # First create a provider and an extension
-        parent_entities = self.create_parent_entities(server, jwt_a, team_a)
+        parent_entities = self.create_parent_entities(server, admin_a_jwt, team_a)
         provider = parent_entities["provider"]
 
-        extension = self.test_POST_201(server, jwt_a, team_a)
+        extension = self.test_POST_201(server, admin_a_jwt, team_a)
 
         # Then install the extension
         options = {"option1": "value1", "option2": "value2"}
@@ -141,7 +152,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         response = server.post(
             f"/v1/provider/extension/{extension['id']}/install?provider_id={provider['id']}",
             json=options,
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -171,7 +182,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         # Verify installation by getting provider extensions
         verify_response = server.get(
             f"/v1/provider/extension/provider/{provider['id']}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         verify_json = verify_response.json()
@@ -187,16 +198,16 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return json_response
 
-    def test_POST_204_uninstall_extension(self, server, jwt_a, team_a):
+    def test_POST_204_uninstall_extension(self, server, admin_a_jwt, team_a):
         """Test uninstalling an extension."""
-        if self.should_skip_test("test_POST_204_uninstall_extension"):
+        if self.reason_to_skip("test_POST_204_uninstall_extension"):
             return
 
         # First create a provider and an extension, and install it
-        parent_entities = self.create_parent_entities(server, jwt_a, team_a)
+        parent_entities = self.create_parent_entities(server, admin_a_jwt, team_a)
         provider = parent_entities["provider"]
 
-        extension = self.test_POST_201(server, jwt_a, team_a)
+        extension = self.test_POST_201(server, admin_a_jwt, team_a)
 
         # Install the extension
         options = {"option1": "value1", "option2": "value2"}
@@ -204,7 +215,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         install_response = server.post(
             f"/v1/provider/extension/{extension['id']}/install?provider_id={provider['id']}",
             json=options,
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -217,7 +228,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         # Verify installation
         before_uninstall_response = server.get(
             f"/v1/provider/extension/provider/{provider['id']}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         before_uninstall_json = before_uninstall_response.json()
@@ -234,7 +245,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         # Then uninstall the extension
         response = server.post(
             f"/v1/provider/extension/{extension['id']}/uninstall?provider_id={provider['id']}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -247,7 +258,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         # Verify uninstallation
         after_uninstall_response = server.get(
             f"/v1/provider/extension/provider/{provider['id']}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         after_uninstall_json = after_uninstall_response.json()
@@ -263,16 +274,16 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return True
 
-    def test_GET_404_provider_extensions_nonexistent(self, server, jwt_a, team_a):
+    def test_GET_404_provider_extensions_nonexistent(self, server, admin_a_jwt, team_a):
         """Test getting extensions for a nonexistent provider."""
-        if self.should_skip_test("test_GET_404_provider_extensions_nonexistent"):
+        if self.reason_to_skip("test_GET_404_provider_extensions_nonexistent"):
             return
 
         nonexistent_id = str(uuid.uuid4())
 
         response = server.get(
             f"/v1/provider/extension/provider/{nonexistent_id}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -284,13 +295,13 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return True
 
-    def test_POST_404_install_extension_nonexistent(self, server, jwt_a, team_a):
+    def test_POST_404_install_extension_nonexistent(self, server, admin_a_jwt, team_a):
         """Test installing a nonexistent extension."""
-        if self.should_skip_test("test_POST_404_install_extension_nonexistent"):
+        if self.reason_to_skip("test_POST_404_install_extension_nonexistent"):
             return
 
         # Create a provider
-        parent_entities = self.create_parent_entities(server, jwt_a, team_a)
+        parent_entities = self.create_parent_entities(server, admin_a_jwt, team_a)
         provider = parent_entities["provider"]
 
         nonexistent_id = str(uuid.uuid4())
@@ -299,7 +310,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         response = server.post(
             f"/v1/provider/extension/{nonexistent_id}/install?provider_id={provider['id']}",
             json=options,
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -312,16 +323,14 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         return True
 
     def test_POST_404_install_extension_nonexistent_provider(
-        self, server, jwt_a, team_a
+        self, server, admin_a_jwt, team_a
     ):
         """Test installing an extension for a nonexistent provider."""
-        if self.should_skip_test(
-            "test_POST_404_install_extension_nonexistent_provider"
-        ):
+        if self.reason_to_skip("test_POST_404_install_extension_nonexistent_provider"):
             return
 
         # Create an extension
-        extension = self.test_POST_201(server, jwt_a, team_a)
+        extension = self.test_POST_201(server, admin_a_jwt, team_a)
 
         nonexistent_id = str(uuid.uuid4())
         options = {"option1": "value1", "option2": "value2"}
@@ -329,7 +338,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         response = server.post(
             f"/v1/provider/extension/{extension['id']}/install?provider_id={nonexistent_id}",
             json=options,
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -350,22 +359,22 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         return True
 
     def test_POST_404_uninstall_extension_nonexistent_provider(
-        self, server, jwt_a, team_a
+        self, server, admin_a_jwt, team_a
     ):
         """Test uninstalling an extension from a nonexistent provider."""
-        if self.should_skip_test(
+        if self.reason_to_skip(
             "test_POST_404_uninstall_extension_nonexistent_provider"
         ):
             return
 
         # Create an extension
-        extension = self.test_POST_201(server, jwt_a, team_a)
+        extension = self.test_POST_201(server, admin_a_jwt, team_a)
 
         nonexistent_id = str(uuid.uuid4())
 
         response = server.post(
             f"/v1/provider/extension/{extension['id']}/uninstall?provider_id={nonexistent_id}",
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         self._assert_response_status(
@@ -387,7 +396,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
     def test_POST_401_install_extension_unauthorized(self, server):
         """Test installing an extension without authentication."""
-        if self.should_skip_test("test_POST_401_install_extension_unauthorized"):
+        if self.reason_to_skip("test_POST_401_install_extension_unauthorized"):
             return
 
         extension_id = str(uuid.uuid4())
@@ -408,16 +417,18 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
 
         return True
 
-    def test_POST_422_install_extension_invalid_options(self, server, jwt_a, team_a):
+    def test_POST_422_install_extension_invalid_options(
+        self, server, admin_a_jwt, team_a
+    ):
         """Test installing an extension with invalid options."""
-        if self.should_skip_test("test_POST_422_install_extension_invalid_options"):
+        if self.reason_to_skip("test_POST_422_install_extension_invalid_options"):
             return
 
         # Create a provider and an extension
-        parent_entities = self.create_parent_entities(server, jwt_a, team_a)
+        parent_entities = self.create_parent_entities(server, admin_a_jwt, team_a)
         provider = parent_entities["provider"]
 
-        extension = self.test_POST_201(server, jwt_a, team_a)
+        extension = self.test_POST_201(server, admin_a_jwt, team_a)
 
         # Create invalid options (assuming the API validates option types)
         # This is a placeholder test - the actual validation would depend on the implementation
@@ -432,7 +443,7 @@ class ProviderExtensionEndpointTest(AbstractEndpointTest):
         response = server.post(
             f"/v1/provider/extension/{extension['id']}/install?provider_id={provider['id']}",
             json=invalid_options,
-            headers=self._auth_header(jwt_a),
+            headers=self._auth_header(admin_a_jwt),
         )
 
         # This assertion might need to be adjusted based on your actual implementation

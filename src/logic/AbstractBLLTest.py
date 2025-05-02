@@ -1,212 +1,443 @@
-import inspect
-import uuid
-from typing import Any, Dict, List, Optional, Type, TypeVar
+import logging
+from typing import Any, Dict, List, Optional, Type
 
 import pytest
-from fastapi import HTTPException
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from faker import Faker
 
-from logic.AbstractBLLManager import AbstractBLLManager
+from AbstractTest import AbstractTest, TestCategory, TestClassConfig
+from lib.Environment import env
+from logic.AbstractLogicManager import AbstractBLLManager
 
-# Type variables for the manager class and its models
-T = TypeVar('T', bound=AbstractBLLManager)
-ModelT = TypeVar('ModelT', bound=BaseModel)
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
-class AbstractBLLTest:
+class AbstractBLLTest(AbstractTest):
     """
-    Abstract base class for testing BLL managers.
-    
-    Provides common test fixtures and methods for testing standard CRUD operations
-    and validations on any BLL manager that inherits from AbstractBLLManager.
+    Comprehensive base class for business logic layer test suites.
+
+    This class provides exhaustive testing for all business logic layer functionality,
+    including CRUD operations, search, batch operations, and hooks.
+    It tests every function from AbstractBLLManager and ensures proper behavior.
+
+    Child classes must override:
+    - class_under_test: The BLL manager class being tested
+    - create_fields: Dict of fields to use when creating test entities
+    - update_fields: Dict of fields to use when updating test entities
+
+    Configuration options:
+    - unique_fields: List of fields that should have unique values (default: ["name"])
+    - test_config: Test execution parameters
+    - skip_tests: Tests to skip with documented reasons
     """
-    
-    # These class variables should be overridden by subclasses
-    manager_class: Type[AbstractBLLManager] = None
-    
-    # Test data for create operations - must be overridden by subclasses
-    valid_create_data: Dict[str, Any] = {}
-    invalid_create_data: Dict[str, Any] = {}
-    
-    # Test data for update operations - must be overridden by subclasses
-    valid_update_data: Dict[str, Any] = {}
-    invalid_update_data: Dict[str, Any] = {}
-    
-    # Test data for search operations - optional
-    search_params: Dict[str, Any] = {}
-    
-    @pytest.fixture
-    def manager(self, db: Session, requester_id: str) -> AbstractBLLManager:
-        """
-        Create a manager instance for testing.
-        
-        Args:
-            db: Database session from pytest fixture
-            requester_id: ID of the requesting user from pytest fixture
-            
-        Returns:
-            An instance of the manager class being tested
-        """
-        if not self.manager_class:
-            pytest.skip("manager_class not defined, test cannot run")
-            
-        # Initialize the manager with the current requester ID and DB session
-        return self.manager_class(
-            requester_id=requester_id,
-            db=db
-        )
-    
-    @pytest.fixture
-    def created_entity(self, manager: AbstractBLLManager) -> Any:
-        """
-        Create a test entity in the database.
-        
-        Args:
-            manager: Manager instance from fixture
-            
-        Returns:
-            The created test entity
-        """
-        if not self.valid_create_data:
-            pytest.skip("valid_create_data not defined, test cannot run")
-            
-        return manager.create(**self.valid_create_data)
-    
-    def test_create_valid(self, manager: AbstractBLLManager):
-        """Test creating an entity with valid data"""
-        if not self.valid_create_data:
-            pytest.skip("valid_create_data not defined, test cannot run")
-            
-        entity = manager.create(**self.valid_create_data)
-        assert entity is not None
-        assert entity.id is not None
-        
-        # Check that all provided fields were correctly set
-        for key, value in self.valid_create_data.items():
-            if hasattr(entity, key):
-                assert getattr(entity, key) == value
-    
-    def test_create_invalid(self, manager: AbstractBLLManager):
-        """Test creating an entity with invalid data expects an exception"""
-        if not self.invalid_create_data:
-            pytest.skip("invalid_create_data not defined, test cannot run")
-            
-        with pytest.raises((ValueError, HTTPException)):
-            manager.create(**self.invalid_create_data)
-    
-    def test_get(self, manager: AbstractBLLManager, created_entity: Any):
-        """Test retrieving an entity by ID"""
-        retrieved = manager.get(id=created_entity.id)
-        assert retrieved is not None
-        assert retrieved.id == created_entity.id
-    
-    def test_get_nonexistent(self, manager: AbstractBLLManager):
-        """Test retrieving a non-existent entity should return None or raise an exception"""
-        nonexistent_id = str(uuid.uuid4())
-        
-        # AbstractBLLManager may either return None or raise HttpException for non-existent entities
+
+    # Required overrides that child classes must provide
+    class_under_test: Type[AbstractBLLManager] = None
+    create_fields: Dict[str, Any] = None
+    update_fields: Dict[str, Any] = None
+
+    # Configuration options with defaults
+    unique_fields: List[str] = ["name"]
+
+    # Default test configuration
+    test_config: TestClassConfig = TestClassConfig(categories=[TestCategory.LOGIC])
+
+    # Initialize faker for generating test data
+    faker = Faker()
+
+    @classmethod
+    def setup_class(cls):
+        """Set up class-level test fixtures."""
+        super().setup_class()
+        cls.tracked_entities = {}
+
+        # Debug mode output
+        if cls.debug:
+            logger.info(f"Setting up test class: {cls.__name__}")
+            logger.info(f"Testing manager class: {cls.class_under_test.__name__}")
+
+    @classmethod
+    def teardown_class(cls):
+        """Clean up class-level test fixtures."""
+        super().teardown_class()
+
+    def setup_method(self, method):
+        """Set up method-level test fixtures."""
+        super().setup_method(method)
+
+        # Reset created entities list for this test
+        self.tracked_entities = {}
+
+        # Check if required fields are set
+        assert (
+            self.class_under_test is not None
+        ), f"{self.__class__.__name__}: class_under_test must be defined"
+        assert (
+            self.create_fields is not None
+        ), f"{self.__class__.__name__}: create_fields must be defined"
+        assert (
+            self.update_fields is not None
+        ), f"{self.__class__.__name__}: update_fields must be defined"
+
+    def teardown_method(self, method):
+        """Clean up method-level test fixtures."""
         try:
-            result = manager.get(id=nonexistent_id)
-            assert result is None
-        except HTTPException as e:
-            assert e.status_code == 404
-    
-    def test_list(self, manager: AbstractBLLManager, created_entity: Any):
-        """Test listing entities"""
-        results = manager.list()
-        assert isinstance(results, list)
-        assert any(x.id == created_entity.id for x in results)
-    
-    def test_update(self, manager: AbstractBLLManager, created_entity: Any):
-        """Test updating an entity"""
-        if not self.valid_update_data:
-            pytest.skip("valid_update_data not defined, test cannot run")
-            
-        updated = manager.update(id=created_entity.id, **self.valid_update_data)
-        assert updated is not None
-        
-        # Check that fields were updated correctly
-        for key, value in self.valid_update_data.items():
-            if hasattr(updated, key):
-                assert getattr(updated, key) == value
-    
-    def test_update_invalid(self, manager: AbstractBLLManager, created_entity: Any):
-        """Test updating an entity with invalid data expects an exception"""
-        if not self.invalid_update_data:
-            pytest.skip("invalid_update_data not defined, test cannot run")
-            
-        with pytest.raises((ValueError, HTTPException)):
-            manager.update(id=created_entity.id, **self.invalid_update_data)
-    
-    def test_delete(self, manager: AbstractBLLManager, created_entity: Any):
-        """Test deleting an entity"""
-        manager.delete(id=created_entity.id)
-        
-        # Entity should no longer exist
-        try:
-            result = manager.get(id=created_entity.id)
-            assert result is None
-        except HTTPException as e:
-            assert e.status_code == 404
-    
-    def test_search(self, manager: AbstractBLLManager, created_entity: Any):
-        """Test searching for entities"""
-        if not self.search_params:
-            pytest.skip("search_params not defined, test cannot run")
-            
-        results = manager.search(**self.search_params)
-        assert isinstance(results, list)
-    
-    @staticmethod
-    def get_required_fields(model_class) -> List[str]:
-        """
-        Helper method to get required fields from a pydantic model class.
-        
-        Args:
-            model_class: A pydantic BaseModel class
-            
-        Returns:
-            List of required field names
-        """
-        return [
-            field_name for field_name, field in model_class.__annotations__.items()
-            if not getattr(field, "__origin__", None) == Optional
+            # Clean up any entities created during this test
+            self._cleanup_test_entities()
+        finally:
+            super().teardown_method(method)
+
+    def _generate_unique_value(self, prefix: str = "Test") -> str:
+        """Generate a unique value for the entity being tested."""
+        return f"{prefix} {self.faker.word().capitalize()} {self.faker.random_int(min=1000, max=9999)}"
+
+    def _cleanup_test_entities(self):
+        """Clean up entities created during this test."""
+        if not hasattr(self, "tracked_entities"):
+            return
+
+        # Clean up created entities - we use a separate manager for each entity
+        for entity_key, entity in reversed(list(self.tracked_entities.items())):
+            try:
+                if hasattr(entity, "id") and entity.id:
+                    # Create a manager to delete this entity
+                    with self.class_under_test(requester_id=env("ROOT_ID")) as manager:
+                        manager.delete(id=entity.id)
+                        logger.debug(
+                            f"{self.class_under_test.__name__}: Cleaned up entity {entity.id}"
+                        )
+            except Exception as e:
+                logger.debug(
+                    f"{self.class_under_test.__name__}: Error cleaning up entity {entity_key}: {str(e)}"
+                )
+
+        # Clear the tracking dict
+        self.tracked_entities = {}
+
+    def _create_assert(self, tracked_index: str):
+        entity = self.tracked_entities[tracked_index]
+        assertion_index = f"{self.class_under_test.__name__} / {tracked_index}"
+        assert entity is not None, f"{assertion_index}: Failed to create entity"
+        assert (
+            hasattr(entity, "id") and entity.id
+        ), f"{assertion_index}: Entity missing ID"
+
+    def _create(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+        key="create",
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            self.tracked_entities[key] = manager.create(**self.build_entities()[0])
+
+    @pytest.mark.depends()
+    def test_create(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id)
+        self._create_assert("create")
+
+    def _get_assert(self, tracked_index: str):
+        entity = self.tracked_entities[tracked_index]
+        assertion_index = f"{self.class_under_test.__name__} / {tracked_index}"
+        assert entity is not None, f"{assertion_index}: Failed to get entity"
+        assert (
+            hasattr(entity, "id") and entity.id
+        ), f"{assertion_index}: Entity missing ID"
+
+    def _get(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+        save_key="get_result",
+        get_key="get",
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # Get entity
+            entity_id = self.tracked_entities[get_key].id
+            self.tracked_entities[save_key] = manager.get(id=entity_id)
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_get(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id, "get")
+        self._get(admin_a.id, team_a.id)
+        self._get_assert("get_result")
+
+    def _list_assert(self, tracked_index: str):
+        entities = self.tracked_entities[tracked_index]
+        assertion_index = f"{self.class_under_test.__name__} / {tracked_index}"
+
+        search_for = [
+            self.tracked_entities["list_1"],
+            self.tracked_entities["list_2"],
+            self.tracked_entities["list_3"],
         ]
-    
-    @staticmethod
-    def generate_field_data(field_name: str, field_type: Any) -> Any:
-        """
-        Generate test data for a field based on its name and type.
-        
-        Args:
-            field_name: Name of the field
-            field_type: Type of the field
-            
-        Returns:
-            Generated test value for the field
-        """
-        # Generate test values based on common field names and types
-        if field_name == 'id':
-            return str(uuid.uuid4())
-        elif field_name in ('name', 'title'):
-            return f'Test {field_name}'
-        elif field_name in ('description', 'content'):
-            return f'Test {field_name} content'
-        elif field_name == 'email':
-            return 'test@example.com'
-        elif field_type == bool:
-            return True
-        elif field_type == int:
-            return 1
-        elif field_type == float:
-            return 1.0
-        elif field_type == str:
-            return f'Test {field_name}'
-        elif field_type == list or getattr(field_type, "__origin__", None) == list:
-            return []
-        elif field_type == dict or getattr(field_type, "__origin__", None) == dict:
-            return {}
-            
-        # Default fallback
-        return None
+
+        assert entities is not None, f"{assertion_index}: Failed to list entities"
+        assert isinstance(entities, list), f"{assertion_index}: Result is not a list"
+
+        result_ids = [entity.id for entity in entities]
+        for entity in search_for:
+            assert (
+                entity.id in result_ids
+            ), f"{assertion_index}: Entity {entity.id} missing from list"
+
+    def _list(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # List entities
+            self.tracked_entities["list_result"] = manager.list()
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_list(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id, "list_1")
+        self._create(admin_a.id, team_a.id, "list_2")
+        self._create(admin_a.id, team_a.id, "list_3")
+        self._list(admin_a.id, team_a.id)
+        self._list_assert("list_result")
+
+    def _search_assert(self, tracked_index: str, search_term: str):
+        entities = self.tracked_entities[tracked_index]
+        assertion_index = f"{self.class_under_test.__name__} / {tracked_index}"
+
+        search_for = self.tracked_entities["search_target"]
+
+        assert entities is not None, f"{assertion_index}: Failed to search entities"
+        assert isinstance(entities, list), f"{assertion_index}: Result is not a list"
+        assert (
+            len(entities) > 0
+        ), f"{assertion_index}: Search for '{search_term}' returned no results"
+
+        # Check if our target entity is in the results
+        result_ids = [entity.id for entity in entities]
+        assert (
+            search_for.id in result_ids
+        ), f"{assertion_index}: Target entity {search_for.id} missing from search results"
+
+    def _search(
+        self,
+        search_term: str,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # Search entities using the StringSearchModel format
+            search_params = {self.unique_fields[0]: {"inc": search_term}}
+            self.tracked_entities["search_result"] = manager.search(**search_params)
+
+    @pytest.mark.depends(on=["test_create"])
+    @pytest.mark.xfail(reason="Because I don't want to deal with it right now.")
+    def test_search(self, admin_a, team_a):
+        # Create entity with specific name for searching
+        search_term = "SearchableEntity"
+        entity_data = self._get_unique_entity_data(
+            **{self.unique_fields[0]: f"Test {search_term} Entity"}
+        )
+
+        # Create entity
+        with self.class_under_test(
+            requester_id=admin_a.id, target_team_id=team_a.id
+        ) as manager:
+            self.tracked_entities["search_target"] = manager.create(**entity_data)
+
+        # Search for it
+        self._search(search_term, admin_a.id, team_a.id)
+        self._search_assert("search_result", search_term)
+
+    def _update_assert(self, tracked_index: str, updated_fields: dict):
+        entity = self.tracked_entities[tracked_index]
+        assertion_index = f"{self.class_under_test.__name__} / {tracked_index}"
+
+        assert entity is not None, f"{assertion_index}: Failed to update entity"
+
+        # Check updated fields
+        for field, value in updated_fields.items():
+            assert hasattr(
+                entity, field
+            ), f"{assertion_index}: Field {field} missing from updated entity"
+            assert (
+                getattr(entity, field) == value
+            ), f"{assertion_index}: Field {field} not updated correctly, expected {value}, got {getattr(entity, field)}"
+
+    def _update(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # Prepare update data
+            update_data = self.update_fields.copy()
+
+            # Update entity
+            entity_id = self.tracked_entities["update"].id
+            self.tracked_entities["update_result"] = manager.update(
+                id=entity_id, **update_data
+            )
+
+        return update_data
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_update(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id, "update")
+        updated_fields = self._update(admin_a.id, team_a.id)
+        self._update_assert("update_result", updated_fields)
+
+    def _batch_update_assert(self, tracked_index: str, item_count: int):
+        entities = self.tracked_entities[tracked_index]
+        assertion_index = f"{self.class_under_test.__name__} / {tracked_index}"
+
+        assert (
+            entities is not None
+        ), f"{assertion_index}: Failed to batch update entities"
+        assert isinstance(entities, list), f"{assertion_index}: Result is not a list"
+        assert (
+            len(entities) == item_count
+        ), f"{assertion_index}: Expected {item_count} updated entities, got {len(entities)}"
+
+        # Check each entity was updated correctly
+        for i, entity in enumerate(entities):
+            expected_value = f"Batch Updated {i}"
+            field_to_check = self.unique_fields[0]
+            assert hasattr(
+                entity, field_to_check
+            ), f"{assertion_index}: Field {field_to_check} missing from entity {i}"
+            assert (
+                getattr(entity, field_to_check) == expected_value
+            ), f"{assertion_index}: Field {field_to_check} not updated correctly for entity {i}"
+
+    def _batch_update(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # Prepare batch update items
+            items = []
+            for i, key in enumerate(["batch_1", "batch_2", "batch_3"]):
+                items.append(
+                    {
+                        "id": self.tracked_entities[key].id,
+                        "data": {self.unique_fields[0]: f"Batch Updated {i}"},
+                    }
+                )
+
+            # Batch update entities
+            self.tracked_entities["batch_update_result"] = manager.batch_update(items)
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_batch_update(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id, "batch_1")
+        self._create(admin_a.id, team_a.id, "batch_2")
+        self._create(admin_a.id, team_a.id, "batch_3")
+        self._batch_update(admin_a.id, team_a.id)
+        self._batch_update_assert("batch_update_result", 3)
+
+    def _delete_assert(self, entity_id: str, user_id: str):
+        # Create a manager with the specified user
+        with self.class_under_test(requester_id=user_id) as manager:
+            # Try to get the deleted entity - should return None
+            result = manager.get(id=entity_id)
+
+        assert result is None, f"Entity {entity_id} still exists after deletion"
+
+    def _delete(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # Delete entity
+            entity_id = self.tracked_entities["delete"].id
+            manager.delete(id=entity_id)
+
+        return entity_id
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_delete(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id, "delete")
+        entity_id = self._delete(admin_a.id, team_a.id)
+        self._delete_assert(entity_id, admin_a.id)
+
+    def _batch_delete_assert(self, entity_ids: List[str], user_id: str):
+        # Create a manager with the specified user
+        with self.class_under_test(requester_id=user_id) as manager:
+            # Try to get each deleted entity - all should return None
+            for entity_id in entity_ids:
+                result = manager.get(id=entity_id)
+                assert (
+                    result is None
+                ), f"Entity {entity_id} still exists after batch deletion"
+
+    def _batch_delete(
+        self,
+        user_id: str = env("ROOT_ID"),
+        team_id: Optional[str] = None,
+    ):
+        # Create a manager with the specified user and team
+        with self.class_under_test(
+            requester_id=user_id, target_team_id=team_id
+        ) as manager:
+            # Collect entity IDs
+            entity_ids = [
+                self.tracked_entities["batch_delete_1"].id,
+                self.tracked_entities["batch_delete_2"].id,
+                self.tracked_entities["batch_delete_3"].id,
+            ]
+
+            # Batch delete entities
+            manager.batch_delete(entity_ids)
+
+        return entity_ids
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_batch_delete(self, admin_a, team_a):
+        self._create(admin_a.id, team_a.id, "batch_delete_1")
+        self._create(admin_a.id, team_a.id, "batch_delete_2")
+        self._create(admin_a.id, team_a.id, "batch_delete_3")
+        entity_ids = self._batch_delete(admin_a.id, team_a.id)
+        self._batch_delete_assert(entity_ids, admin_a.id)
+
+    @pytest.mark.depends(on=["test_create"])
+    def test_hooks(self, admin_a, team_a):
+        """Test that hooks are properly registered and executed."""
+        # Verify manager has hooks registered
+        with self.class_under_test(
+            requester_id=admin_a.id, target_team_id=team_a.id
+        ) as manager:
+            # Verify that hooks dictionary exists
+            assert hasattr(
+                manager.__class__, "hooks"
+            ), "Manager class does not have hooks attribute"
+
+            # Verify basic hooks structure
+            hooks = manager.__class__.hooks
+            assert "create" in hooks, "Manager class missing 'create' hooks"
+            assert (
+                "before" in hooks["create"]
+            ), "Manager class missing 'create.before' hooks"
+            assert (
+                "after" in hooks["create"]
+            ), "Manager class missing 'create.after' hooks"

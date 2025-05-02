@@ -2,6 +2,8 @@
 
 ## Core Structure
 
+> **Note:** For comprehensive documentation on the core abstractions used in the Business Logic Layer, including AbstractBLLManager, please refer to [BLL.Abstraction.md](BLL.Abstraction.md#business-logic-layer-manager-abstractbllmanager).
+
 The Business Logic Layer in this application follows a standardized pattern to ensure consistency across different domain entities. Comments should not be present unless required for some in a senior engineer position to understand what's happening. There should never be direct database connection queries in the BLL files, all queries must do through the abstract functions in Mixins.py. 
 
 ## AbstractBLLManager-based Managers
@@ -91,23 +93,23 @@ Example structure:
 def validate_x(id, fk_1):
     pass # Perform validation. 
 
-class AgentModel(
+class ProviderModel(
     BaseMixinModel,
     NameMixinModel,
     UserReferenceModel,
 ):
     favourite: bool = Field(
-        False, description="Whether this agent is marked as a favorite"
+        False, description="Whether this provider is marked as a favorite"
     )
 
     class ReferenceID:
-        agent_id: str = Field(..., description="The ID of the related agent")
+        provider_id: str = Field(..., description="The ID of the related provider")
 
         class Optional:
-            agent_id: Optional[str] = None
+            provider_id: Optional[str] = None
 
         class Search:
-            agent_id: Optional[StringSearchModel] = None
+            provider_id: Optional[StringSearchModel] = None
 
     class Create(
         BaseModel,
@@ -115,7 +117,7 @@ class AgentModel(
         UserModel.ReferenceID.Optional,
     ):
         favourite: Optional[bool] = Field(
-            False, description="Whether this agent is marked as a favorite"
+            False, description="Whether this provider is marked as a favorite"
         )
         # Optional validator, if validation logic is required.
         @model_validator(mode="after")
@@ -129,7 +131,7 @@ class AgentModel(
         UserModel.ReferenceID.Optional,
     ):
         favourite: Optional[bool] = Field(
-            None, description="Whether this agent is marked as a favorite"
+            None, description="Whether this provider is marked as a favorite"
         )
         # Optional validator, if validation logic is required.
         @model_validator(mode="after")
@@ -145,28 +147,28 @@ class AgentModel(
         favourite: Optional[bool] = Field(None, description="Filter by favorite status")
 
 
-class AgentReferenceModel(AgentModel.ReferenceID):
-    agent: Optional[AgentModel] = None
+class ProviderReferenceModel(ProviderModel.ReferenceID):
+    provider: Optional[ProviderModel] = None
 
-    class Optional(AgentModel.ReferenceID.Optional):
-        agent: Optional[AgentModel] = None
+    class Optional(ProviderModel.ReferenceID.Optional):
+        provider: Optional[ProviderModel] = None
 
 
-class AgentNetworkModel:
+class ProviderNetworkModel:
     class POST(BaseModel):
-        agent: AgentModel.Create
+        provider: ProviderModel.Create
 
     class PUT(BaseModel):
-        agent: AgentModel.Update
+        provider: ProviderModel.Update
 
     class SEARCH(BaseModel):
-        agent: AgentModel.Search
+        provider: ProviderModel.Search
 
     class ResponseSingle(BaseModel):
-        agent: AgentModel
+        provider: ProviderModel
 
     class ResponsePlural(BaseModel):
-        agents: List[AgentModel]
+        providers: List[ProviderModel]
 ```
 
 These should be defined **IMMEDIATELY ABOVE THE RELEVANT MANAGER** (not all at the top of the file), and are then linked to the manager for reference by the abstract functions:
@@ -374,7 +376,7 @@ Batch operations follow this pattern and collect errors while processing all ite
 ### Task Management (BLL_Tasks)
 
 - Scheduling and execution logic
-- Integration with agents for task execution
+- Integration with providers for task execution
 
 ### Memory Management (BLL_Memories)
 
@@ -382,4 +384,4 @@ Batch operations follow this pattern and collect errors while processing all ite
 - Chunking strategies for large content
 
 ## Utility Functions
-Some managers have static functions to get runtime functionality such as `list_runtime_extensions`, `list_runtime_providers`, the UserManager has functions such as `auth` and `verify_token` and the invitation manager has a function for `generate_invitation_link`. Using static functions such as these to extend functionality is encouraged. They CAN be asynchronous / async if required, such as `prompt` and `transcribe` on AgentManager, because they involve querying other APIs.
+Some managers have static functions to get runtime functionality such as `list_runtime_extensions`, `list_runtime_providers`, the UserManager has functions such as `auth` and `verify_token` and the invitation manager has a function for `generate_invitation_link`. Using static functions such as these to extend functionality is encouraged. They CAN be asynchronous / async if required, such as `prompt` and `transcribe` on ProviderManager, because they involve querying other APIs.

@@ -2,7 +2,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from endpoints.AbstractEPRouter import AbstractEPRouter, AuthType
+from endpoints.AbstractEndpointRouter import AbstractEPRouter, AuthType
+from lib.Environment import env
 from logic.BLL_Auth import User, UserManager
 from logic.BLL_Providers import (
     ProviderExtensionAbilityNetworkModel,
@@ -31,6 +32,26 @@ def get_provider_manager(
     return ProviderManager(
         requester_id=user.id,
         target_user_id=target_user_id or user.id,
+        target_team_id=target_team_id,
+    )
+
+
+# Factory for API Key authenticated routes
+def get_provider_manager_api_key(
+    target_user_id: Optional[str] = Query(
+        None, description="Target user ID for admin operations"
+    ),
+    target_team_id: Optional[str] = Query(
+        None, description="Target team ID for admin operations"
+    ),
+):
+    """Get an initialized ProviderManager instance for API key authenticated routes."""
+    # Use ROOT_ID as the requester for system operations
+    effective_target_user_id = target_user_id or env("ROOT_ID")
+
+    return ProviderManager(
+        requester_id=env("ROOT_ID"),
+        target_user_id=effective_target_user_id,
         target_team_id=target_team_id,
     )
 
@@ -104,14 +125,14 @@ provider_instance_examples = {
             "provider_id": "p1r2v3d4-5678-90ab-cdef-123456789012",
             "provider": {
                 "id": "p1r2v3d4-5678-90ab-cdef-123456789012",
-                "name": "OpenAI",
+                "name": "Google",
             },
             "model_name": "gpt-4",
             "api_key": "••••••••••••••••••••••••••",  # Masked for security
             "team_id": "t1e2a3m4-5678-90ab-cdef-123456789012",
             "team": {
                 "id": "t1e2a3m4-5678-90ab-cdef-123456789012",
-                "name": "AI Engineering",
+                "name": "Engineering",
             },
             "created_at": "2025-03-01T12:00:00.000Z",
             "created_by_user_id": "u1s2e3r4-5678-90ab-cdef-123456789012",
@@ -168,12 +189,12 @@ rotation_examples = {
     "get": {
         "rotation": {
             "id": "r1o2t3a4-5678-90ab-cdef-123456789012",
-            "name": "Production AI Models",
+            "name": "Production Models",
             "description": "Models approved for production use",
             "team_id": "t1e2a3m4-5678-90ab-cdef-123456789012",
             "team": {
                 "id": "t1e2a3m4-5678-90ab-cdef-123456789012",
-                "name": "AI Engineering",
+                "name": "Engineering",
             },
             "created_at": "2025-03-01T12:00:00.000Z",
             "created_by_user_id": "u1s2e3r4-5678-90ab-cdef-123456789012",
@@ -183,14 +204,14 @@ rotation_examples = {
     },
     "create": {
         "rotation": {
-            "name": "Development AI Models",
+            "name": "Development Models",
             "description": "Models for testing and development",
             "team_id": "t1e2a3m4-5678-90ab-cdef-123456789012",
         }
     },
     "update": {
         "rotation": {
-            "name": "Updated Production AI Models",
+            "name": "Updated Production Models",
             "description": "Updated models approved for production use",
         }
     },
@@ -203,12 +224,12 @@ rotation_provider_examples = {
             "rotation_id": "r1o2t3a4-5678-90ab-cdef-123456789012",
             "rotation": {
                 "id": "r1o2t3a4-5678-90ab-cdef-123456789012",
-                "name": "Production AI Models",
+                "name": "Production Models",
             },
             "provider_instance_id": "i1n2s3t4-5678-90ab-cdef-123456789012",
             "provider_instance": {
                 "id": "i1n2s3t4-5678-90ab-cdef-123456789012",
-                "name": "GPT-4 Production",
+                "name": "Production",
             },
             "parent_id": None,
             "created_at": "2025-03-01T12:00:00.000Z",
@@ -329,11 +350,11 @@ provider_extension_router = AbstractEPRouter(
 provider_router = AbstractEPRouter(
     prefix="/v1/provider",
     tags=["Provider Management"],
-    manager_factory=get_provider_manager,
+    manager_factory=get_provider_manager_api_key,
     network_model_cls=ProviderNetworkModel,
     resource_name="provider",
     example_overrides=provider_examples,
-    auth_type=AuthType.API_KEY,  # Provider is a system entity requiring API key
+    auth_type=AuthType.API_KEY,
 )
 
 # Create provider instance router as a standalone router

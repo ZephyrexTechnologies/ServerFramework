@@ -1,8 +1,9 @@
-import datetime
 import logging
 import uuid
+from datetime import date, datetime
 from typing import Any, Dict, Type, TypeVar, Union, get_args, get_origin
 
+from faker import Faker
 from pydantic import BaseModel
 
 # Set up logging
@@ -18,10 +19,14 @@ class ExampleGenerator:
 
     This class analyzes Pydantic models and generates realistic example data based on
     field types, names, and patterns. It supports nested models, lists, and optional fields.
+    Uses Faker library to generate realistic fake data.
     """
 
     # Cache for generated examples to avoid redundant work
     _example_cache: Dict[str, Dict[str, Any]] = {}
+
+    # Initialize faker instance
+    _faker = Faker()
 
     @staticmethod
     def generate_uuid() -> str:
@@ -62,22 +67,29 @@ class ExampleGenerator:
             return {"key": "value"}
 
         # Generate example based on field type
-        example_generators = {
-            str: lambda: ExampleGenerator._generate_string_example(field_name),
-            int: lambda: 42,
-            float: lambda: 42.5,
-            bool: lambda: ExampleGenerator._generate_bool_example(field_name),
-            datetime.datetime: lambda: datetime.datetime.now().isoformat(),
-            datetime.date: lambda: datetime.datetime.now().date().isoformat(),
-        }
+        faker = ExampleGenerator._faker
 
-        # Use appropriate generator or return None for unsupported types
-        return example_generators.get(field_type, lambda: None)()
+        # Generate example based on field type and field name
+        if field_type is str:
+            return ExampleGenerator._generate_string_example(field_name)
+        elif field_type is int:
+            return faker.random_int(min=1, max=100)
+        elif field_type is float:
+            return round(faker.random.uniform(1, 100), 2)
+        elif field_type is bool:
+            return ExampleGenerator._generate_bool_example(field_name)
+        elif field_type is datetime:
+            return faker.date_time_this_decade().isoformat()
+        elif field_type is date:
+            return faker.date_this_decade().isoformat()
+        else:
+            return None
 
     @staticmethod
     def _generate_string_example(field_name: str) -> str:
         """Generate string examples based on field name patterns."""
         field_lower = field_name.lower()
+        faker = ExampleGenerator._faker
 
         # ID fields
         if field_lower == "id" or ("id" in field_lower and field_lower != "id"):
@@ -85,68 +97,95 @@ class ExampleGenerator:
 
         # Name fields
         elif "name" in field_lower:
-            return ExampleGenerator.field_name_to_example(field_name)
+            if "first" in field_lower:
+                return faker.first_name()
+            elif "last" in field_lower:
+                return faker.last_name()
+            elif "user" in field_lower:
+                return faker.user_name()
+            elif "display" in field_lower:
+                return faker.name()
+            elif "company" in field_lower:
+                return faker.company()
+            else:
+                return faker.name()
 
         # Description fields
         elif "description" in field_lower:
-            return (
-                f"Description for {ExampleGenerator.field_name_to_example(field_name)}"
-            )
+            return faker.paragraph(nb_sentences=2)
 
         # Content fields
         elif "content" in field_lower:
-            return f"Content for {ExampleGenerator.field_name_to_example(field_name)}"
+            return faker.paragraph(nb_sentences=3)
 
         # Path fields
         elif "path" in field_lower:
-            # Extract entity from field name
-            entity_part = field_lower.replace("path", "").replace("_", "")
             if "relative" in field_lower:
-                return f"path/to/{entity_part or 'resource'}.ext"
+                return faker.file_path(depth=2)
             elif "hosted" in field_lower:
-                return f"https://example.com/path/to/{entity_part or 'resource'}.ext"
+                return faker.url()
             else:
-                return f"/path/to/{entity_part or 'resource'}"
+                return faker.file_path(absolute=True)
 
         # URL fields
         elif "url" in field_lower:
-            # Extract entity from field name
-            entity_part = field_lower.replace("url", "").replace("_", "")
-            return f"https://example.com/{entity_part or 'resource'}"
+            return faker.url()
 
         # Role fields
         elif "role" in field_lower:
+            roles = ["admin", "user", "owner", "editor", "viewer"]
             if "admin" in field_lower:
                 return "admin"
             elif "owner" in field_lower:
                 return "owner"
             else:
-                return "user"
+                return faker.random_element(roles)
 
         # Email fields
         elif "email" in field_lower:
-            # Extract potential username from field
-            username_part = field_lower.replace("email", "").replace("_", "")
-            if username_part:
-                return f"{username_part}@example.com"
-            else:
-                return "user@example.com"
+            return faker.email()
 
         # Status fields
         elif "status" in field_lower:
-            return "active"
+            statuses = ["active", "pending", "inactive", "archived"]
+            return faker.random_element(statuses)
 
         # Type fields
         elif "type" in field_lower:
-            return "standard"
+            types = ["standard", "premium", "basic", "advanced"]
+            return faker.random_element(types)
 
         # Code fields
         elif "code" in field_lower:
-            return "ABC123"
+            return faker.bothify(text="???###")
 
         # Token fields
         elif "token" in field_lower:
-            return f"tk-{ExampleGenerator.generate_uuid()[:8]}"
+            return f"tk-{faker.lexify('????????')}"
+
+        # Phone fields
+        elif "phone" in field_lower:
+            return faker.phone_number()
+
+        # Address fields
+        elif "address" in field_lower:
+            return faker.address()
+
+        # City fields
+        elif "city" in field_lower:
+            return faker.city()
+
+        # State fields
+        elif "state" in field_lower:
+            return faker.state()
+
+        # Country fields
+        elif "country" in field_lower:
+            return faker.country()
+
+        # Zipcode/Postal code fields
+        elif "zip" in field_lower or "postal" in field_lower:
+            return faker.postcode()
 
         # Generic string example
         else:
@@ -155,59 +194,18 @@ class ExampleGenerator:
     @staticmethod
     def _generate_bool_example(field_name: str) -> bool:
         """Generate boolean examples based on field name patterns."""
+        field_lower = field_name.lower()
+
         # Favorite/favourite fields default to True
-        if "favourite" in field_name.lower() or "favorite" in field_name.lower():
+        if "favourite" in field_lower or "favorite" in field_lower:
             return True
 
         # Is/has/enabled fields default to True
-        elif field_name.lower().startswith(("is_", "has_", "enabled")):
+        elif field_lower.startswith(("is_", "has_", "enabled")):
             return True
 
-        # Other boolean fields default to False
-        return False
-
-    @staticmethod
-    def field_name_to_example(field_name: str) -> str:
-        """
-        Convert a field name to a readable example value.
-
-        Args:
-            field_name: The name of the field
-
-        Returns:
-            A readable example string
-        """
-        # Remove underscores and convert to title case
-        parts = field_name.replace("_", " ").title().split()
-
-        # Special handling for specific field names
-        if field_name == "name":
-            return "Example Name"
-
-        # Extract potential entity type from the field name
-        # E.g., "project_name" -> "Project", "user_id" -> "User"
-        entity_type = None
-        for part in parts:
-            # Skip common attribute words
-            if part.lower() in ["name", "id", "description", "type", "status", "date"]:
-                continue
-            entity_type = part
-            break
-
-        # Generate an appropriate example based on field semantics
-        if entity_type:
-            # Create a generic but descriptive example
-            return f"Example {entity_type}"
-        elif "name" in field_name.lower():
-            return "Example Name"
-        elif "title" in field_name.lower():
-            return "Example Title"
-        elif "description" in field_name.lower():
-            return "Example Description"
-
-        # Default to joining the parts
-        formatted = " ".join(parts)
-        return f"Example {formatted}"
+        # Other boolean fields default to random boolean
+        return ExampleGenerator._faker.boolean()
 
     @staticmethod
     def generate_example_for_model(model_cls: Type[BaseModel]) -> Dict[str, Any]:
@@ -228,36 +226,38 @@ class ExampleGenerator:
 
         logger.debug(f"Generating example for model: {model_cls.__name__}")
         example = {}
+        try:
+            # Process fields from model
+            for field_name, field in model_cls.model_fields.items():
+                field_info = field
+                field_type = field_info.annotation
 
-        # Process fields from model
-        for field_name, field in model_cls.model_fields.items():
-            field_info = field
-            field_type = field_info.annotation
+                # Check if field has a default value
+                if not field_info.is_required():
+                    if field_info.default is not None:
+                        example[field_name] = field_info.default
+                        continue
+                    # Check if field has a default factory
+                    elif field_info.default_factory is not None:
+                        example[field_name] = field_info.default_factory()
+                        continue
 
-            # Check if field has a default value
-            if not field_info.is_required():
-                if field_info.default is not None:
-                    example[field_name] = field_info.default
-                    continue
-                # Check if field has a default factory
-                elif field_info.default_factory is not None:
-                    example[field_name] = field_info.default_factory()
-                    continue
+                # Check for example in field metadata
+                if (
+                    hasattr(field_info, "json_schema_extra")
+                    and field_info.json_schema_extra
+                ):
+                    schema_extra = field_info.json_schema_extra
+                    if isinstance(schema_extra, dict) and "example" in schema_extra:
+                        example[field_name] = schema_extra["example"]
+                        continue
 
-            # Check for example in field metadata
-            if (
-                hasattr(field_info, "json_schema_extra")
-                and field_info.json_schema_extra
-            ):
-                schema_extra = field_info.json_schema_extra
-                if isinstance(schema_extra, dict) and "example" in schema_extra:
-                    example[field_name] = schema_extra["example"]
-                    continue
-
-            # Generate example value based on field type and name
-            example[field_name] = ExampleGenerator.get_example_value(
-                field_type, field_name
-            )
+                # Generate example value based on field type and name
+                example[field_name] = ExampleGenerator.get_example_value(
+                    field_type, field_name
+                )
+        except AttributeError as e:
+            raise e
 
         # Cache the result for future use
         ExampleGenerator._example_cache[cache_key] = example.copy()

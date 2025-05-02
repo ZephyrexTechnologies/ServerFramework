@@ -1,0 +1,20 @@
+{
+    "python.testing.pytestArgs": [
+        "."
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "formatFiles.excludedFolders": [ "node_modules", ".vscode", ".git", "dist", ".chrome", ".venv", "__pycache__", ".pytest_cache" ],
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "**/.pytest_cache": true,
+        "**/__pycache__": true,
+        "src/sdk": true,
+        "src/extensions/3d": true,
+
+    }
+}

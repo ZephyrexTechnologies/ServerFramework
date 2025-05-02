@@ -1,9 +1,11 @@
 import logging
+import sys
 from enum import Enum
 from os import makedirs, path
 
 from sqlalchemy import UUID, String, create_engine
-from sqlalchemy.ext.declarative import declarative_base
+
+# from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from lib.Environment import env
@@ -43,7 +45,12 @@ def setup_sqlite_for_regex(engine):
 DEFAULT_USER = env("DEFAULT_USER")
 try:
     DATABASE_TYPE = env("DATABASE_TYPE")
-    DATABASE_NAME = env("DATABASE_NAME")
+    append_test = f'{env("DATABASE_NAME")}'.endswith(".test")
+    DATABASE_NAME = (
+        f'{env("DATABASE_NAME")}.test'
+        if "pytest" in sys.modules and not append_test
+        else env("DATABASE_NAME")
+    )
     PK_TYPE = UUID if DATABASE_TYPE != "sqlite" else String
 
     if DATABASE_TYPE != "sqlite":

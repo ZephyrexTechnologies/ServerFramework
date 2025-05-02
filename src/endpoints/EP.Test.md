@@ -1,306 +1,207 @@
-# API Endpoint Testing Framework
+# API Endpoint Testing Framework (`AbstractEPTest`)
 
-This document outlines the patterns and best practices for testing API endpoints using the `AbstractEndpointTest` class. This framework provides a comprehensive approach to testing RESTful and GraphQL endpoints with minimal boilerplate code for new resources.
+This document outlines the patterns and best practices for testing API endpoints using the `AbstractEndpointTest` class, located in `src/endpoints/AbstractEPTest.py`. This framework provides a comprehensive approach to testing RESTful and GraphQL endpoints with minimal boilerplate code for new resources.
 
 ## Core Testing Philosophy
 
 The endpoint testing framework follows several key principles:
 
-1. **Completeness**: Tests cover the full API surface, including all standard CRUD operations
-2. **Consistency**: Tests ensure consistent behavior across resources and endpoints
-3. **Efficiency**: The framework reduces duplicated test code through abstraction
-4. **Maintainability**: Common patterns are centralized for easier updates
-5. **Coverage**: Tests verify positive scenarios, error handling, validation, and edge cases
+1.  **Completeness**: Tests cover the full API surface, including all standard CRUD operations, batch operations, search, and GraphQL equivalents.
+2.  **Consistency**: Tests ensure consistent behavior, request/response formats, and error handling across resources and endpoints.
+3.  **Efficiency**: The framework reduces duplicated test code through abstraction and helper methods.
+4.  **Maintainability**: Common patterns and assertion logic are centralized for easier updates.
+5.  **Coverage**: Tests verify positive scenarios, error handling (auth, validation, not found, permissions), pagination, field selection, includes, and edge cases like parent entity handling.
 
 ## AbstractEndpointTest Class
 
 The `AbstractEndpointTest` class serves as the foundation for testing all API endpoints. It provides:
 
-- Standard CRUD operation tests (create, read, update, delete)
+- Standard REST CRUD operation tests (create, read, update, delete)
 - Batch operations support
-- Nested resource handling
-- Authentication testing
-- Parent-child relationship testing
-- GraphQL integration
-- Data validation testing
+- Nested resource handling (path parameters, parent ID checks)
+- Authentication testing (JWT and API Key)
+- Parent-child relationship testing (including null parents)
+- GraphQL integration (queries, mutations, subscriptions)
+- Data validation testing (422 errors)
+- Multi-user permission testing (preventing access to other users' resources)
+- Helper methods for generating data, formatting payloads, building URLs, and making assertions
+- Intelligent test data generation using `faker`
 
-### Class Configuration
+## Base Class (`AbstractTest`)
 
-When creating a test class for a specific resource, you must configure the following class attributes:
+`AbstractEPTest` inherits from `AbstractTest`, gaining access to test categorization, configuration, lifecycle hooks, common assertions, and test skipping functionality. See `Framework.Test.md` for details.
+
+## Class Configuration
+
+When creating a test class for a specific resource endpoint, you must configure the following class attributes:
 
 ```python
+from endpoints.AbstractEPTest import AbstractEndpointTest, ParentEntity
+from AbstractTest import TestCategory, TestClassConfig, SkippedTest
+
 class ConversationEndpointTest(AbstractEndpointTest):
-    # Base endpoint path (without /v1 prefix)
+    # Base endpoint path (e.g., "conversation", not "/v1/conversation")
     base_endpoint = "conversation"
-    
-    # Entity name in singular form
+
+    # Entity name in singular form (used for payload nesting, e.g., {"conversation": {...}})
     entity_name = "conversation"
-    
-    # Field to use for update operations
+
+    # Field name (string type) to use for basic update tests
     string_field_to_update = "name"
-    
-    # Required fields to verify in responses
+
+    # List of field names expected in a standard GET response for this entity
     required_fields = ["id", "name", "created_at", "project_id"]
-    
-    # True if entity requires API Key authentication instead of JWT
+
+    # Set to True if the endpoint uses API Key auth instead of JWT (e.g., system entities)
     system_entity = False
-    
-    # Parent entity configurations
+
+    # Configure parent entities for nested resources or foreign key checks
     parent_entities = [
         ParentEntity(name="project", key="project_id", is_path=True)
     ]
+
+    # GraphQL: Additional required parameters for GQL operations beyond parent entities
+    required_graphql_params: Dict[str, Any] = {}
+
+    # Search: Set to False if the resource doesn't support POST /search
+    supports_search: bool = True
+    # Search: List of fields usable in search tests
+    searchable_fields: List[str] = ["name"]
+    # Search: Example value to use when testing search
+    search_example_value: str = "Test Search Query"
     
-    # Tests to skip if needed
+    # Optional test configuration - inherited from AbstractTest
+    test_config = TestClassConfig(
+        categories=[TestCategory.INTEGRATION],  # Test categories
+        timeout=60,                            # Timeout in seconds
+        cleanup_after_each=True                # Clean up resources after each test
+    )
+
+    # Optionally skip tests (inherited from AbstractTest)
     skip_tests = [
-        SkippedTest(name="test_GET_200_fields", reason="Fields parameter not implemented")
+        # SkippedTest(name="test_GET_200_fields", reason="Fields parameter not implemented", jira_ticket="AGI-123")
     ]
-    
-    # Implement create_parent_entities method for nested resources
-    def create_parent_entities(self, server, jwt_a, team_a):
+
+    # IMPORTANT: Implement if parent_entities is not empty
+    def create_parent_entities(self, server, admin_a_jwt, team_a):
         """Create parent entities required for testing this resource."""
-        # Create a project to use for conversation testing
-        project_payload = {"name": f"Test Project {uuid.uuid4()}"}
-        
-        if team_a and "team_id" in project_payload:
-            project_payload["team_id"] = team_a.get("id", None)
-            
-        nested_payload = {"project": project_payload}
-        
-        response = server.post(
-            "/v1/project", 
-            json=nested_payload,
-            headers=self._auth_header(jwt_a)
-        )
-        
+        # Use the `server` (TestClient) and `admin_a_jwt` to make API calls
+        # to create the necessary parent(s) defined in `parent_entities`.
+        # Must return a dictionary mapping parent entity names to their created dicts.
+        # Example:
+        project_payload = {"project": {"name": f"Test Project {uuid.uuid4()}`"}} 
+        response = server.post("/v1/project", json=project_payload, headers=self._auth_header(admin_a_jwt))
         assert response.status_code == 201
         project = response.json()["project"]
-        
         return {"project": project}
 ```
 
-### Included Test Methods
+## Provided Fixtures
 
-The `AbstractEndpointTest` class provides these standard test methods:
+`AbstractEPTest` relies heavily on fixtures provided by `conftest.py`:
 
-#### Basic CRUD Tests
-- `test_POST_201`: Create resource successfully
-- `test_GET_200_list`: List resources successfully
-- `test_GET_200_id`: Get a specific resource successfully
-- `test_PUT_200`: Update a resource successfully
-- `test_DELETE_204`: Delete a resource successfully
+- `server`: The FastAPI `TestClient` instance.
+- `admin_a`, `user_b`: Dictionary representations of created user records.
+- `admin_a_jwt`, `jwt_b`: JWT tokens corresponding to `admin_a` and `user_b`.
+- `team_a`, `team_b`: Dictionary representations of created team records.
+- `api_key`: (Implicitly used via environment for system entity tests).
+- `db_session`, `requester_id`: Available but less commonly used directly in EP tests.
 
-#### Error Cases
-- `test_POST_401`: Create without authentication
-- `test_POST_422_invalid_data`: Create with invalid data
-- `test_PUT_422`: Update with invalid data
-- `test_PUT_404_nonexistent`: Update nonexistent resource
-- `test_GET_404_nonexistent`: Get nonexistent resource
-- `test_DELETE_404_nonexistent`: Delete nonexistent resource
+## Included Test Methods
 
-#### Parent Resource Tests
-- `test_POST_404_nonexistent_parent`: Create with nonexistent parent
-- `test_GET_404_nonexistent_parent`: List resources with nonexistent parent
+`AbstractEPTest` provides a wide array of tests covering REST and GraphQL interactions:
 
-#### Bulk Operations
-- `test_POST_201_batch`: Create multiple resources in batch
-- `test_PUT_200_batch`: Update multiple resources in batch
-- `test_DELETE_204_batch`: Delete multiple resources in batch
-- `test_POST_422_batch`: Create batch with invalid resources
+#### Basic CRUD & Batch (REST)
+- `test_POST_201`: Create resource, validating response structure and audit fields.
+- `test_POST_201_null_parents`: Create resource with nullable parents set to null.
+- `test_POST_201_batch`: Create multiple resources.
+- `test_GET_200_list`: List resources.
+- `test_GET_200_id`: Get a specific resource.
+- `test_PUT_200`: Update a resource.
+- `test_PUT_200_batch`: Update multiple resources.
+- `test_DELETE_204`: Delete a resource.
+- `test_DELETE_204_batch`: Delete multiple resources.
 
-#### Advanced Features
-- `test_POST_201_null_parents`: Create with nullable parent fields
-- `test_GET_200_includes`: Get resources with included related entities
-- `test_GET_200_fields`: Get resources with specific fields
-- `test_GET_200_pagination`: Test pagination for list endpoints
-- `test_POST_200_search`: Search for resources
+#### Advanced Features & Error Cases (REST)
+- `test_GET_200_pagination`: Test `limit` and `offset`.
+- `test_GET_200_fields`: Test `fields` parameter (currently xfailed).
+- `test_GET_200_includes`: Test `include` parameter (currently xfailed).
+- `test_POST_200_search`: Test the `/search` endpoint (currently xfailed).
+- `test_POST_401`/`test_GET_401`/`test_PUT_401`/`test_DELETE_401`: Test operations without authentication.
+- `test_POST_403_system`/`test_PUT_403_system`/`test_DELETE_403_system`: Test modifying system entities without API key.
+- `test_POST_422_invalid_data`: Test creating with invalid data.
+- `test_POST_422_batch`: Test batch creating with invalid data (currently xfailed).
+- `test_PUT_422`: Test updating with invalid data.
+- `test_GET_404_nonexistent`/`test_PUT_404_nonexistent`/`test_DELETE_404_nonexistent`: Test operations on non-existent IDs.
+- `test_GET_404_other_user`/`test_PUT_404_other_user`/`test_DELETE_404_other_user`: Test accessing another user's resource.
+- `test_POST_404_nonexistent_parent`/`test_GET_404_nonexistent_parent`: Test operations with an invalid parent ID.
+- `test_POST_403_role_too_low`: Test permission denied based on role (if applicable).
 
-#### Multi-user Testing
-- `test_GET_404_other_user`: Get another user's resource
-- `test_PUT_404_other_user`: Update another user's resource
-- `test_DELETE_404_other_user`: Delete another user's resource
+#### GraphQL Tests
+- `test_GQL_query_single`: Test single resource query.
+- `test_GQL_query_list`: Test list resource query.
+- `test_GQL_query_filter`: Test filtering in list query (currently xfailed).
+- `test_GQL_mutation_create`: Test create mutation (currently xfailed).
+- `test_GQL_mutation_update`: Test update mutation (currently xfailed).
+- `test_GQL_mutation_delete`: Test delete mutation (currently xfailed).
+- `test_GQL_subscription`: Verify GraphQL subscription format/structure.
 
-#### System Entity Tests
-- `test_POST_403_system`: Create system entity without API key
-- `test_PUT_403_system`: Update system entity without API key
-- `test_DELETE_403_system`: Delete system entity without API key
-
-#### GraphQL Integration
-- `test_GQL_query_single`: Test GraphQL single resource query
-- `test_GQL_query_list`: Test GraphQL list resources query
-- `test_GQL_query_filter`: Test GraphQL filtered query
-- `test_GQL_mutation_create`: Test GraphQL resource creation
-- `test_GQL_mutation_update`: Test GraphQL resource update
-- `test_GQL_mutation_delete`: Test GraphQL resource deletion
-- `test_GQL_subscription`: Verify GraphQL subscription format
-
-### Skipping Tests
-
-Tests can be skipped by adding them to the `skip_tests` class attribute:
-
-```python
-skip_tests = [
-    SkippedTest(name="test_GET_200_fields", reason="Fields parameter not supported"),
-    SkippedTest(name="test_POST_200_search", reason="Search not implemented")
-]
-```
-
-### Handling Nested Resources
-
-For testing nested resources, proper configuration of the `parent_entities` attribute is essential. Each parent entity must be defined using the `ParentEntity` class:
-
-```python
-ParentEntity(
-    name="project",      # Name of the parent entity
-    key="project_id",    # Field name in this entity for the parent ID
-    nullable=False,      # True if the parent can be null
-    system=False,        # True if parent is a system entity
-    is_path=True         # True if parent ID is included in URL path
-)
-```
-
-The `is_path` parameter is especially important as it determines whether the parent ID is included in the URL path for nested resources.
-
-For resources with parent entities, you must implement the `create_parent_entities` method to create the necessary parent resources for testing.
-
-## Test Execution Flow
-
-Each test in the `AbstractEndpointTest` class follows this general flow:
-
-1. **Setup**: Create any prerequisite resources (e.g., parent entities)
-2. **Test Data Generation**: Generate test data using `ExampleGenerator` or custom logic
-3. **Request Execution**: Make API request with appropriate authentication
-4. **Assertion**: Verify response status, structure, and content
-5. **Verification**: For operations that modify data, verify the changes with additional requests
-
-## Customization Points
-
-Child classes can customize testing behavior through:
-
-1. **Class Attributes**: Configure basic resource information
-2. **Helper Methods**: Implement methods like `create_parent_entities`
-3. **Test Skip List**: Skip specific tests that don't apply to a resource
-4. **Method Overrides**: Override test methods if necessary
-
-## Authentication Patterns
-
-Tests handle different authentication types automatically:
-
-- **JWT Authentication**: Used by default
-- **API Key Authentication**: Used for system entities (when `system_entity = True`)
-
-## URL Path Resolution
-
-The framework automatically handles the construction of endpoint URLs based on the resource configuration:
-
-1. **Standard Resources**: `/v1/resource` and `/v1/resource/{id}`
-2. **Nested Resources**: `/v1/parent/{parent_id}/resource` and `/v1/parent/{parent_id}/resource/{id}`
-
-## Payload Formatting
-
-The `nest_payload_in_entity` method ensures that request payloads follow the required format as defined in EP.schema.md:
-
-- Single resource creation: `{resource_name: {...}}`
-- Batch creation: `{resource_name_plural: [{...}, {...}]}`
-- Batch update: `{resource_name: {...}, target_ids: ["id1", "id2"]}`
-- Batch delete: `{target_ids: ["id1", "id2"]}`
-
-## Response Validation
-
-Each test validates that responses follow the expected patterns:
-
-1. **Status Codes**: Verifies appropriate status codes for operations
-2. **Response Format**: Confirms response structure matches expected format
-3. **Required Fields**: Ensures all required fields are present in responses
-4. **Entity Relationships**: Verifies correct parent/child relationships
+*(Note: Several GraphQL and advanced REST tests are marked as `xfail` due to potential pending implementation or known issues like #37, #38, #39, #40, #41, #59. These should be addressed as features are completed.)*
 
 ## Test Data Generation
 
-The framework uses `ExampleGenerator` to create realistic test data with:
+The `generate_test_data` method makes intelligent decisions about what data to generate based on field types and naming conventions. For example:
+- Name fields receive randomized names
+- Email fields receive valid email addresses
+- Boolean fields receive True/False values
 
-- Unique identifiers for test resources
-- Meaningful field values based on field names
-- Appropriate data types for each field
+## Skipping Tests
 
-## Integration with GraphQL
-
-For GraphQL testing, the framework provides methods to:
-
-1. Build properly formatted GraphQL queries and mutations
-2. Convert field names between snake_case (REST) and camelCase (GraphQL)
-3. Verify GraphQL response structures
-
-## Examples
-
-### Basic Resource Test
+Use the `skip_tests` class attribute (inherited from `AbstractTest`) to skip tests that are not applicable to the specific endpoint being tested.
 
 ```python
-class ProjectEndpointTest(AbstractEndpointTest):
-    base_endpoint = "project"
-    entity_name = "project"
-    string_field_to_update = "name"
-    required_fields = ["id", "name", "created_at"]
+# In ResourceEndpointTest class
+skip_tests = [
+    SkippedTest(name="test_POST_200_search", reason="Search not implemented for Resource", jira_ticket="AGI-123"),
+    SkippedTest(name="test_GQL_query_list", reason="GraphQL not enabled for Resource")
+]
 ```
 
-### Nested Resource Test
+## Handling Nested Resources
 
-```python
-class MessageEndpointTest(AbstractEndpointTest):
-    base_endpoint = "message"
-    entity_name = "message"
-    string_field_to_update = "content"
-    required_fields = ["id", "content", "created_at", "conversation_id"]
-    
-    parent_entities = [
-        ParentEntity(name="conversation", key="conversation_id", is_path=True)
-    ]
-    
-    def create_parent_entities(self, server, jwt_a, team_a):
-        # Create a project first
-        project_response = server.post(
-            "/v1/project",
-            json={"project": {"name": f"Test Project {uuid.uuid4()}"}},
-            headers=self._auth_header(jwt_a)
-        )
-        assert project_response.status_code == 201
-        project = project_response.json()["project"]
-        
-        # Then create a conversation under the project
-        conversation_response = server.post(
-            f"/v1/project/{project['id']}/conversation",
-            json={"conversation": {"name": f"Test Conversation {uuid.uuid4()}"}},
-            headers=self._auth_header(jwt_a)
-        )
-        assert conversation_response.status_code == 201
-        conversation = conversation_response.json()["conversation"]
-        
-        return {"conversation": conversation}
-```
+1.  Define parent(s) in the `parent_entities` list.
+2.  Set `is_path=True` for the parent whose ID is part of the URL path.
+3.  Implement the `create_parent_entities` method to create the necessary parent resource(s) using the `server` test client.
+4.  The framework automatically constructs nested URLs and includes parent IDs in payloads and assertions where appropriate.
 
-### System Entity Test
+## Test Execution Flow
 
-```python
-class ProviderEndpointTest(AbstractEndpointTest):
-    base_endpoint = "provider"
-    entity_name = "provider"
-    string_field_to_update = "name"
-    required_fields = ["id", "name", "created_at"]
-    system_entity = True  # Uses API key auth instead of JWT
-```
+Most tests follow this pattern:
+
+1.  **Check Skip**: Call `self.reason_to_skip_test(test_name)`.
+2.  **Setup**: Call `create_parent_entities` if needed. Create initial test resource(s) using the `server` fixture and helper methods (`_setup_test_resources`, `create_payload`).
+3.  **Execute**: Make the target API request (POST, GET, PUT, DELETE, GraphQL) using the `server` fixture and appropriate headers (`_auth_header`, `_api_key_header`).
+4.  **Assert Status**: Verify the HTTP status code using `_assert_response_status`.
+5.  **Assert Response Body**: Verify the structure and content of the JSON response using helpers like `_assert_entity_in_response`, `_assert_entities_in_response`.
+6.  **Assert Side Effects**: Verify database state changes or relationships (e.g., `_assert_parent_ids_match`, `_assert_has_created_by_user_id`).
+
+## Helper Methods
+
+`AbstractEPTest` provides numerous internal helper methods (`_` prefix) for common tasks:
+
+- URL construction (`get_list_endpoint`, `get_detail_endpoint`, etc.)
+- Payload generation and nesting (`generate_test_data`, `create_payload`, `nest_payload_in_entity`)
+- Authentication header generation (`_auth_header`, `_api_key_header`)
+- Response assertion (`_assert_response_status`, `_assert_entity_in_response`, etc.)
+- GraphQL query/mutation building (`_build_gql_query`, `_build_gql_mutation`)
+- Data extraction (`_extract_parent_ids`)
 
 ## Best Practices
 
-1. **Complete Test Coverage**: Create test classes for all resources in EP.schema.md
-2. **Proper Parent Entity Configuration**: Correctly define all parent-child relationships
-3. **Generate Quality Test Data**: Use meaningful data that exercises validations
-4. **Efficient Test Setup**: Minimize database operations in test setup
-5. **Consistent Assertions**: Use the assertion helpers provided by the framework
-6. **Resource Cleanup**: Properly clean up resources after tests
-7. **Skip Appropriately**: Skip tests only when they truly don't apply
-8. **Document Customizations**: Comment any overridden methods or unusual configurations
-
-## Implementation Notes
-
-1. **Test Independence**: Tests are designed to be independent; each creates its own resources
-2. **Error Clarity**: Error messages include detailed context for easier debugging
-3. **Flexibility**: The framework supports all endpoint patterns in EP.schema.md and EP.patterns.md
-4. **Path Validation**: Endpoint URLs are verified against patterns in EP.schema.md
+1.  **Configure Accurately**: Ensure `base_endpoint`, `entity_name`, `required_fields`, and `parent_entities` accurately reflect the endpoint being tested.
+2.  **Implement `create_parent_entities`**: If testing a nested resource, provide a correct implementation.
+3.  **Use Helpers**: Leverage the built-in test methods and helper functions.
+4.  **Skip Appropriately**: Skip tests for features explicitly not supported by the endpoint.
+5.  **Add Custom Tests**: Add new test methods for custom routes or complex logic not covered by the standard tests.
+6.  **Use TestCategory**: Categorize your tests appropriately to enable selective test execution.
+7.  **Leverage Common Assertions**: Use the common assertion methods from AbstractTest for entity validation.

@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, HTTPException, Path, Query, status
 
-from endpoints.AbstractEPRouter import AuthType, create_router_tree
+from endpoints.AbstractEndpointRouter import AuthType, create_router_tree
 from logic.BLL_Auth import User, UserManager
 from logic.BLL_Extensions import ExtensionManager
 from logic.BLL_Providers import ProviderExtensionNetworkModel, ProviderManager

@@ -17,6 +17,8 @@ Endpoints use one of these authentication patterns:
 
 Most endpoints inherit from `AbstractEPRouter` which provides a standardized implementation of CRUD operations according to the patterns in EP.schema.md.
 
+> **Note**: For detailed documentation on AbstractEPRouter, AbstractEPTest, and related components, please refer to [EP.Abstraction.md](EP.Abstraction.md).
+
 ### Router Creation Pattern
 
 ```python
@@ -37,6 +39,8 @@ resource_router = AbstractEPRouter(
 ### Customizing Examples
 
 Examples are automatically generated using the `ExampleGenerator` class. You can customize these examples:
+
+> **Note**: For detailed documentation on the Example Factory and example generation, please refer to [EP.ExampleFactory.md](EP.ExampleFactory.md).
 
 ```python
 # Create custom examples
@@ -327,40 +331,6 @@ app_router.include_router(provider_router)
 
 # Finally, include in FastAPI app
 app.include_router(app_router)
-```
-
-## Example Generation
-
-The `ExampleGenerator` automatically generates realistic examples for API documentation. It:
-
-1. Analyzes Pydantic models to determine field types and names
-2. Generates appropriate example values based on field semantics
-3. Creates complete examples for each operation type
-4. Caches results to improve performance
-
-The generator is smart about field naming patterns:
-
-- For ID fields: Generates UUIDs
-- For name fields: Creates descriptive names
-- For status fields: Uses "active"
-- For email fields: Creates realistic email addresses
-- For URLs and paths: Generates appropriate URLs
-
-You can customize generated examples:
-
-```python
-# Customize an existing example
-examples["get"]["resource"]["name"] = "Production Resource"
-examples["get"]["resource"]["status"] = "active"
-
-# Use the customization helper
-examples["update"] = ExampleGenerator.customize_example(
-    examples["update"],
-    {
-        "resource.name": "Updated Resource",
-        "resource.tags": ["important", "critical"]
-    }
-)
 ```
 
 ## Network Models Pattern

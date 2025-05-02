@@ -15,7 +15,7 @@ from database.DB_Providers import (
     Rotation,
     RotationProviderInstance,
 )
-from logic.AbstractBLLManager import (
+from logic.AbstractLogicManager import (
     AbstractBLLManager,
     BaseMixinModel,
     NameMixinModel,
@@ -144,6 +144,18 @@ class ProviderManager(AbstractBLLManager):
                 status_code=400,
                 detail="Provider name must be at least 2 characters long",
             )
+
+    @staticmethod
+    def list_runtime_providers():
+        return ["OpenAI", "AGInYourPC"]
+
+    @staticmethod
+    def get_runtime_provider_options(provider_name):
+        if provider_name == "OpenAI":
+            return {"OPENAI_API_KEY": "", "OPENAI_MODEL": "gpt-4"}
+        elif provider_name == "AGInYourPC":
+            return {"AGINYOURPC_API_KEY": "", "AGINYOURPC_AI_MODEL": "local"}
+        return {}
 
 
 class ProviderExtensionModel(BaseMixinModel, UpdateMixinModel):

@@ -9,7 +9,7 @@ Last Updated: December 13, 2024
 - Usage data (features accessed, interaction patterns)
 - Performance and error reporting data
 ## How We Use Your Information
-- Providing and maintaining the Zephyrex Server and related services
+- Providing and maintaining applications and related services
 - Improving and optimizing our services
 - Communicating with you about service updates and changes
 - Responding to your requests and support inquiries

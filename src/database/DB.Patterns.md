@@ -1,176 +1,271 @@
-# Database Architecture Patterns
+# Database Patterns Documentation
 
-## Core Architecture
+This document details the design patterns used throughout the database system that are not covered in the permission system or database management documentation.
 
-- SQLAlchemy ORM with declarative base
-- Multi-database support (InfluxDB, PostgreSQL, MariaDB, MSSQL, Pinecone, Chroma and SQLite)
-  - The core of the database can select between PostgresSQL, MariaDB, MongoDB, MSSQL or SQLite.
-  - The vector portion of the database can either be integrated, or separate on Pincone or Chroma.
-  - Optional logging using InfluxDB (in other layers, no implementation in DB files). 
-- UUIDs are used as primary keys throughout (PK_TYPE denotes the actual type).
-  - IDs are stored as UUIDs regardless of database type, this means either native, UNIQUEIDENTIFIER (MSSQL) or TEXT (SQLite).
-- `system` denotes system tables, which should only ever be CRUD'd with the system API key.
-- Session management through `get_session()` factory function.
-- Database connection pooling (pool_size=40, max_overflow=-1).
-- Custom SQLite regex support through function registration.
-- Enumerations should be stored in the smallest data type possible (usually an int variant) for a given enum (use SqlEnum).
-```python
-from enum import IntEnum as PyEnum
-from sqlalchemy import Enum as SqlEnum
-class MFAMethodType(PyEnum):
-    TOTP = 1
-    EMAIL = 2
-    SMS = 3
+## Composition through Mixins
 
-# Column definition using SqlAlchemy Enum type
-method_type = Column(SqlEnum(MFAMethodType), nullable=False)
-```
-- All columns except primary and foreign keys should have comments explaining their function.
+Rather than relying on complex inheritance hierarchies, the system uses composition through mixins to share functionality between models.
 
-## Reference Mixins (Not in Mixins.py)
+### Why Mixins?
 
-Every table should define both an optional and required mixin for itself (nullable vs non-nullable foreign key) - this mixin is used on other tables referencing this table. Note that these should not include column comments. For example:
+1. **Granular Feature Selection**: Models only include needed functionality
+2. **Reduced Code Duplication**: Common behaviors defined once
+3. **Easier Maintenance**: Changes to a feature affect only the relevant mixin
+4. **Better Testability**: Mixins can be tested in isolation
+
+Common mixins include:
 
 ```python
-class UserRefBaseMixin:
-    @declared_attr
-    def user(cls):
-        return relationship(
-            User.__name__,
-            backref=(pluralize(cls.__tablename__))
-        )
-
-    @declared_attr
-    def user_id(cls):
-        # Default behavior is required (nullable=False)
-        return Column(
-            PK_TYPE, 
-            ForeignKey(f"{User.__tablename__}.id"), 
-            index=True, 
-            nullable=False
-        )
-
-class OptionalUserRefMixin(UserRefBaseMixin):
-    @declared_attr
-    def user_id(cls):
-        return Column(
-            PK_TYPE,
-            ForeignKey(f"{User.__tablename__}.id"),
-            index=True,
-            nullable=True 
-        )
+class BaseMixin:  # Core functionality all models need
+class UpdateMixin:  # For models that can be updated/deleted
+class ParentMixin:  # For hierarchical models
+class ImageMixin:  # For models with image URLs
+class UserRefMixin:  # For models linked to users
+class TeamRefMixin:  # For models linked to teams
 ```
-In counterpart to the table that implements the mixin, after the class declaration usea a post-class late-binding to implement the reverse:
+
+## Session Management with Decorators
+
+The `with_session` decorator centralizes session management logic:
+
 ```python
-# Define relationship after class definition to avoid circular imports
-Entity.users = relationship(User.__name__, backref=singularize(Entity.__tablename__))
+def with_session(func):
+    @functools.wraps(func)
+    def wrapper(cls, requester_id: String, db: Optional[Session] = None, *args, **kwargs):
+        session = db if db else get_session()
+        try:
+            result = func(cls, requester_id, session, *args, **kwargs)
+            return result
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            if db is None:
+                session.close()
+    return wrapper
 ```
 
-## Vector Handling (`DB_Memories.py`):
-- Custom `Vector` type for embedding storage in:
-  ```python
-  class Vector(TypeDecorator):
-      """Unified vector storage for both SQLite and PostgreSQL"""
-      impl = VARCHAR if DATABASE_TYPE == "sqlite" else ARRAY(Float)
-      cache_ok = True
+This pattern:
+1. Creates a session if none is provided
+2. Automatically handles transactions
+3. Ensures proper cleanup with finally block
+4. Allows session reuse across operations
 
-      def process_bind_param(self, value, dialect):
-          """Convert vector to storage format"""
-          if value is None:
-              return None
+## Dynamic Reference Mixins
 
-          # Convert to numpy array and ensure 1D
-          if isinstance(value, np.ndarray):
-              value = value.reshape(-1).tolist()
-          elif isinstance(value, list):
-              value = np.array(value).reshape(-1).tolist()
+The system uses a factory function to create reference mixins dynamically:
 
-          # For SQLite, store as string representation
-          if DATABASE_TYPE == "sqlite":
-              return f'[{",".join(map(str, value))}]'
+```python
+def create_reference_mixin(target_entity, **kwargs):
+    # Creates a mixin with foreign key and relationship to target_entity
+```
 
-          # For PostgreSQL, return as list
-          return value
+Benefits of this approach:
+1. **Consistent References**: All foreign keys follow the same pattern
+2. **Optional Variants**: Each mixin includes `.Optional` variant for nullable references
+3. **Constraint Naming**: Automatic constraint naming for better migrations
+4. **Relationship Customization**: Backref names and other options can be customized
 
-      def process_result_value(self, value, dialect):
-          """Convert from storage format to numpy array"""
-          if value is None:
-              return None
+## Hooks Registry
 
-          # For SQLite, parse string representation
-          if DATABASE_TYPE == "sqlite":
-              try:
-                  value = eval(value)
-              except:
-                  return None
+A hooks registry pattern allows extending model behavior:
 
-          # Convert to 1D numpy array
-          return np.array(value).reshape(-1)
-  ```
+```python
+# Global hooks registry to properly handle inheritance
+_hooks_registry = {}
+hook_types = ["create", "update", "delete", "get", "list"]
 
-## ORM Event Handling
+def get_hooks_for_class(cls):
+    """Get or create hooks for a class"""
+```
 
-- `@event.listens_for` for DB event registration
-- Custom triggers for post-save actions
-- Lifecycle hooks for entity state transitions
+Models access hooks through a descriptor:
 
-## Seed Data Pattern (Optional)
+```python
+class HooksDescriptor:
+    def __get__(self, obj, objtype=None):
+        if objtype is None:
+            objtype = type(obj)
+        return get_hooks_for_class(objtype)
 
-- Class-level `seed_list` attribute containing default records:
-  ```python
-  class ActivityType(Base, BaseMixin,UpdateMixin):
-      __tablename__ = "activity_types"
-      # ... column definitions ...
-      
-      seed_list = [
-          {
-              "id": "FFFFFFFF-FFFF-FFFF-0000-FFFFFFFFFFFF"
-              "name": "Error",
-              "description": "The agent has encountered an error.",
-          },
-          {
-              "id": "FFFFFFFF-FFFF-FFFF-00FF-FFFFFFFFFFFF",
-              "name": "Warning",
-              "description": "The agent has encountered a warning.",
-          },
-          {
-              "id": "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
-              "name": "Thinking",
-              "description": "The agent is thinking.",
-          },
-      ]
-  ```
-- Seed data invoked during database initialization
-- IDs in seed data follow a specific format: 3 sections of `F` followed by a discriminator section, followed by another section of `F`.
+# Usage in BaseMixin
+hooks = HooksDescriptor()
+```
 
-## Column and Index Best Practices
+Hook execution:
 
-- Every FK column should have an index
-- Column naming should follow a consistent pattern:
-  - `id` for primary keys
-  - `[entity]_id` for foreign keys (except if there are multiple to the same table)
-  - `parent_id` for self-references (in most cases)
-  - Descriptive names for all other columns
-- Timestamp columns should use standard names:
-  - `created_at`, `updated_at`, `deleted_at`
-  - `expires_at` for expirable entities
-  - `[action]_at` for specific events (e.g., `last_login_at`)
+```python
+# Before hooks
+if "create" in hooks and "before" in hooks["create"]:
+    before_hooks = hooks["create"]["before"]
+    if before_hooks:
+        hook_dict = HookDict(data)
+        for hook in before_hooks:
+            hook(hook_dict, db)
+```
 
-## Performance Optimization Patterns
+This approach:
+1. **Separates Core Logic from Extensions**: Base code remains clean
+2. **Preserves Inheritance**: Hooks follow class inheritance patterns
+3. **Avoids Metaclass Complexity**: Uses simpler descriptors
+4. **Thread-Safety**: Registry pattern is thread-safe
 
-- Similarity search optimizations:
-  - Vector indexing for embedding similarity
-  - Custom similarity functions for database portability
-  - Cross-database compatible search implementation
-- Strategic use of ORM loading options:
-  - Selecting specific columns with `load_only()`
-  - Controlling relationship loading with `joinedload()`, `selectinload()`, or `lazyload()`
-- Batch processing for bulk operations
+## DTO Conversion System
 
-## Domain Model Organization
+The system converts between database entities and DTOs with a flexible approach:
 
-- Clear domain boundaries with separate DB_[Domain].py files
-- Hierarchical organization of related entities
-- Consistent application of mixins across domains
-- Cross-domain relationships defined with clear ownership
-- Permission delegation patterns between domains
+```python
+def db_to_return_type(
+    entity: Union[T, List[T]],
+    return_type: Literal["db", "dict", "dto", "model"] = "dict",
+    dto_type: Optional[Type[DtoT]] = None,
+    fields: List[str] = [],
+) -> Union[T, DtoT, ModelT, List[Union[T, DtoT, ModelT]]]:
+```
+
+Benefits:
+1. **Return Type Flexibility**: Same code handles different return formats
+2. **Field Selection**: Clients can request only needed fields
+3. **Nested Object Handling**: Automatically processes nested relationships
+4. **Batch Processing**: Works with both single entities and lists
+
+## Validation Patterns
+
+Field validation is centralized:
+
+```python
+def validate_columns(cls, updated=None, **kwargs):
+    """Validate that the provided column names exist in the model."""
+```
+
+This ensures:
+1. **Early Validation**: Invalid columns are caught before database operations
+2. **Consistent Error Messages**: Standard format for validation errors
+3. **Security**: Prevents injection attacks via column names
+
+## System Initialization
+
+The system uses a seeding pattern to initialize data:
+
+```python
+def seed():
+    """Generic seeding function that populates the database based on seed_list attributes."""
+```
+
+Models declare seed data:
+```python
+class Role(Base, BaseMixin, UpdateMixin, TeamRefMixin.Optional, ParentMixin):
+    seed_list = [
+        {"name": "user", "friendly_name": "User", "parent_id": None},
+        {"name": "admin", "friendly_name": "Admin", "parent_id": "user-id"},
+        # ...
+    ]
+```
+
+Or provide dynamic seed data:
+```python
+@classmethod
+def get_seed_list(cls):
+    """Dynamically get the seed list to avoid circular imports"""
+```
+
+Benefits:
+1. **Declarative Initialization**: Models define their own seed data
+2. **Dependency Ordering**: Automatically handles dependencies
+3. **Environment Awareness**: Seeds can adapt to environment variables
+4. **Idempotence**: Seed operations check for existing records
+
+## Query Building Pattern
+
+Query construction is standardized:
+
+```python
+def build_query(
+    session, cls, joins=[], options=[], filters=[], order_by=None, limit=None, offset=None, **kwargs
+):
+```
+
+This provides:
+1. **Consistent Query Building**: All queries follow same pattern
+2. **Composable Filters**: Multiple filters can be combined
+3. **Pagination Support**: Built-in limit/offset handling
+4. **Relationship Loading**: Supports eager loading through joins/options
+
+## Soft Deletion
+
+The system implements soft deletion:
+
+```python
+@declared_attr
+def deleted_at(cls):
+    return Column(DateTime, default=None)
+
+@declared_attr
+def deleted_by_user_id(cls):
+    return Column(PK_TYPE, nullable=True)
+```
+
+Automatic filtering:
+```python
+if hasattr(cls, "deleted_at"):
+    filters = filters + [cls.deleted_at == None]
+```
+
+Benefits:
+1. **Data Preservation**: Historical data is maintained
+2. **Audit Trail**: Records who deleted what and when
+3. **Recoverability**: Deleted records can be restored
+4. **Permission Control**: Only ROOT_ID can see deleted records
+
+## Dynamic Extension Loading
+
+Extensions are loaded dynamically:
+
+```python
+def get_extensions_from_env():
+    """Get extensions from the APP_EXTENSIONS environment variable"""
+```
+
+This pattern:
+1. **Configurable Functionality**: Features can be enabled/disabled without code changes
+2. **Plugin Architecture**: Extensions follow consistent patterns
+3. **Environment-Based Configuration**: Different environments can enable different features
+4. **Runtime Discovery**: System adapts to available extensions
+
+## Circular Dependency Management
+
+The system handles circular dependencies with local imports:
+
+```python
+def _get_role_hierarchy_map(db: Session) -> dict:
+    # Local import to break cycle
+    from database.DB_Auth import Role
+```
+
+This approach:
+1. **Prevents Import Cycles**: Models can reference each other
+2. **Minimizes Import Time**: Only imports what's needed when needed
+3. **Supports Cross-Module Functionality**: Core functions can work with multiple models
+4. **Maintains Type Safety**: Type hints still work properly
+
+## HookDict for Property Access
+
+The system uses a special dictionary class for hook data:
+
+```python
+class HookDict(dict):
+    """Dictionary subclass that allows attribute access to dictionary items"""
+    def __getattr__(self, name):
+        if name in self:
+            value = self[name]
+            if isinstance(value, dict):
+                return HookDict(value)
+            return value
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+```
+
+This allows:
+1. **Attribute-Style Access**: `hook_dict.name` instead of `hook_dict["name"]`
+2. **Recursive Conversion**: Nested dictionaries are also converted
+3. **Natural Programming Style**: More readable hook code
+4. **Type Compatibility**: Functions similar to an object with attributes

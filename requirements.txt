@@ -1,22 +1,46 @@
-aiohttp
-alembic
-bcrypt
-beautifulsoup4
-broadcaster
-colorama
+# Core Web Framework
 fastapi
-httpx
-influxdb
-influxdb-client
-numpy
-Pillow
-psycopg2
-pydantic
-pymongo
-pytest
-pyvirtualdisplay
-python-dotenv
-requests
-SQLAlchemy
-torch
 uvicorn
+
+# Data Validation & Serialization
+pydantic
+
+# Database & ORM
+alembic
+aiosqlite
+SQLAlchemy
+
+# Asynchronous Operations
+broadcaster
+
+# GraphQL
+strawberry-graphql[fastapi]
+
+# Authentication & Security
+bcrypt
+cryptography
+pyjwt
+
+# HTTP Clients
+httpx
+requests
+
+# Testing
+coverage
+faker
+pytest
+pytest-cov
+pytest-depends
+
+# Utilities
+colorama
+distro
+inflect
+loguru
+networkx
+numpy
+pluralizer
+python-dotenv
+resolvelib
+semver
+stringcase 

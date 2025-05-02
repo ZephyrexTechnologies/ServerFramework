@@ -1,5 +1,10 @@
 Attribution-NonCommercial-NoDerivatives 4.0 International
-Copyright (c) Zephyrex Technologies
+Copyright (c) Jameson Grieve
+=======================================================================
+The portions of this repository found at the below link, at and previous to the below linked commit are subject to the MIT license found in ./docs/LICENSE-AGiXT.
+https://github.com/Josh-XT/AGiXT/
+https://github.com/Josh-XT/AGiXT/tree/bfad49dfb74d6d51ecd3d5598d9fd8e85eb3aff0
+All other portions, modifications are subject to this license.
 =======================================================================
 GITHUB FORK EXEMPTION:
 Notwithstanding the NoDerivatives condition of this license, users are permitted to create and distribute derivatives of this work exclusively through the GitHub fork functionality, provided that:

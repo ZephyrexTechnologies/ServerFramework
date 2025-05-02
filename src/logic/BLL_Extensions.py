@@ -1,10 +1,9 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
 from database.DB_Extensions import Ability, Extension
-from logic.AbstractBLLManager import (
+from logic.AbstractLogicManager import (
     AbstractBLLManager,
     BaseMixinModel,
     NameMixinModel,
@@ -69,19 +68,21 @@ class ExtensionManager(AbstractBLLManager):
     NetworkModel = ExtensionNetworkModel
     DBClass = Extension
 
-    def __init__(
-        self,
-        requester_id: str,
-        target_user_id: Optional[str] = None,
-        target_team_id: Optional[str] = None,
-        db: Optional[Session] = None,
-    ):
+    def __init__(self, **kwargs: Any) -> None:
+        # Accept all parameters as kwargs to change signature
+        requester_id = kwargs.get("requester_id")
+        target_user_id = kwargs.get("target_user_id")
+        target_team_id = kwargs.get("target_team_id")
+        db = kwargs.get("db")
+
+        # Initialize parent with the extracted parameters
         super().__init__(
             requester_id=requester_id,
             target_user_id=target_user_id,
             target_team_id=target_team_id,
             db=db,
         )
+        # Initialize ability manager to None
         self._abilities = None
 
     @property
@@ -98,15 +99,45 @@ class ExtensionManager(AbstractBLLManager):
     @staticmethod
     def list_runtime_extensions() -> List[str]:
         import glob
+        import logging
         import os
 
-        extensions = []
-        for ext_path in glob.glob("extensions/EXT_*.py"):
-            ext_name = os.path.splitext(os.path.basename(ext_path))[0]
-            if ext_name.startswith("EXT_"):
-                ext_name = ext_name[4:]
-            extensions.append(ext_name)
-        return extensions
+        from lib.Environment import env
+
+        # Get extensions from APP_EXTENSIONS environment variable
+        app_extensions = env("APP_EXTENSIONS")
+        if app_extensions:
+            extension_list = [
+                ext.strip() for ext in app_extensions.split(",") if ext.strip()
+            ]
+            if extension_list:
+                logging.info(f"Using extensions from APP_EXTENSIONS: {extension_list}")
+                return extension_list
+
+        # Fallback to finding EXT_*.py files
+        try:
+            # Get the current directory
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            src_dir = os.path.dirname(current_dir)  # parent of logic dir
+            extensions_dir = os.path.join(src_dir, "extensions")
+
+            logging.info(f"Looking for extensions in: {extensions_dir}")
+
+            extensions = []
+            # Look for EXT_*.py files in the extensions directory
+            for ext_path in glob.glob(
+                os.path.join(extensions_dir, "**", "EXT_*.py"), recursive=True
+            ):
+                ext_name = os.path.splitext(os.path.basename(ext_path))[0]
+                if ext_name.startswith("EXT_"):
+                    ext_name = ext_name[4:]
+                logging.info(f"Found extension: {ext_name}")
+                extensions.append(ext_name)
+
+            return extensions
+        except Exception as e:
+            logging.error(f"Error finding extensions: {str(e)}")
+            return []
 
 
 class AbilityModel(
@@ -165,13 +196,14 @@ class AbilityManager(AbstractBLLManager):
     NetworkModel = AbilityNetworkModel
     DBClass = Ability
 
-    def __init__(
-        self,
-        requester_id: str,
-        target_user_id: Optional[str] = None,
-        target_team_id: Optional[str] = None,
-        db: Optional[Session] = None,
-    ):
+    def __init__(self, **kwargs: Any) -> None:
+        # Extract parameters from kwargs
+        requester_id = kwargs.get("requester_id")
+        target_user_id = kwargs.get("target_user_id")
+        target_team_id = kwargs.get("target_team_id")
+        db = kwargs.get("db")
+
+        # Call parent constructor
         super().__init__(
             requester_id=requester_id,
             target_user_id=target_user_id,

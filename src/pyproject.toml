@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "server"
+version = "0.0.0"
+description = "SDK for interacting with the API"
+readme = "README.md"
+authors = [
+    {name = "API SDK Team", email = "sdk@example.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+keywords = ["api", "sdk", "client"]
+dependencies = [
+    "requests>=2.25.0",
+]
+requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/example/api-sdk"
+Documentation = "https://docs.example.com/api-sdk"
+Repository = "https://github.com/example/api-sdk.git"
+Issues = "https://github.com/example/api-sdk/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "pytest-cov>=2.12.0",
+    "black>=22.1.0",
+    "isort>=5.10.0",
+    "mypy>=0.910",
+    "pylint>=2.12.0",
+]
+docs = [
+    "sphinx>=4.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+packages = ["sdk"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*" 

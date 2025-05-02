@@ -9,6 +9,162 @@
 	- PUT: `{entity_name: {}, target_ids: ["", "", ""]}`
 	- DELETE: Query Parameter: `?target_ids=id1,id2,id3`
 
+## Authentication Domain
+
+### User Router 
+
+- Create (Register) a User [None / Basic]
+    - POST /v1/user
+- Login a User [Basic]
+    - !POST /v1/user/authorize
+        - Authenticates a user and returns a JWT token after creating a session
+- Get a User
+	- !GET /v1/user
+		- Gets the requesting user (singular), as opposed to a list.
+    - GET /v1/user/{id}
+- List Users
+    - GET /v1/team/{team_id}/user
+	    - Listing all users the requester has access to without a `team_id` is not supported.
+- Update a User
+    - !PUT /v1/user
+        - Updates the requesting user (singular), as opposed to bulk processing.
+- Delete a User
+    - !DELETE /v1/user
+        - Deletes the requesting user (singular), as opposed to bulk processing.
+- Change User Password
+    - !PATCH /v1/user
+        - Changes the current user's password.
+- Verify Authorization
+    - !GET /v1
+        - Verifies a JWT or API Key is valid (for something), and returns a 204 status if so, and a 401 if not. 
+    - !PATCH /v1
+        - Refreshes the current session.
+    - !DELETE /v1
+        - Terminates the current session.
+- Terminate a Specific Session
+    - !DELETE /v1/user/session/{session_id}
+- Terminate All Sessions
+    - !DELETE /v1/user/session
+- List All Sessions
+    - !GET /v1/user/session
+- Get a Session
+    - !GET /v1/user/session/{session_id}
+
+### Team Router [JWT]
+
+- Create a Team
+    - POST /v1/team
+    - POST /v1/team/{team_id}/team
+- Get a Team
+    - GET /v1/team/{id}
+- List Teams
+    - GET /v1/team
+    - GET /v1/team/{team_id}/team
+- Update a Team
+    - PUT /v1/team/{id}
+    - PUT /v1/team
+        - Bulk processing of updates.
+- Delete a Team
+    - DELETE /v1/team/{id}
+    - DELETE /v1/team
+        - Bulk processing of updates
+- Get Team Users
+    - !GET /v1/team/{id}/user
+        - Retrieves users in a team
+- Update User Role in Team
+    - !PUT /v1/team/{id}/user/{user_id}/role
+- Search Teams
+    - POST /v1/team/search
+
+### Role Router [JWT]
+- Create a Role
+    - POST /v1/team/{team_id}/role
+- Get a Role
+    - GET /v1/role/{id}
+- List Roles
+    - GET /v1/team/{team_id}/role
+- Update a Role
+    - PUT /v1/role/{id}
+- Delete a Role
+    - DELETE /v1/role/{id}
+- Search Roles
+    - POST /v1/team/{team_id}/role/search
+
+### Invitation Router [JWT]
+- Create an Invitation
+    - POST /v1/invitation
+    - POST /v1/team/{team_id}/invitation
+- Get an Invitation
+    - GET /v1/invitation/{id}
+- List Invitations
+    - GET /v1/invitation
+    - GET /v1/team/{team_id}/invitation
+- Update an Invitation
+    - PUT /v1/invitation/{id}
+    - PUT /v1/invitation
+        - Bulk processing of updates.
+- Delete an Invitation
+    - DELETE /v1/invitation/{id}
+    - DELETE /v1/invitation
+        - Bulk processing of updates
+    - !DELETE /v1/team/{team_id}/invitation
+        - Revokes ALL open invitations.
+- Search Invitations
+    - POST /v1/invitation/search
+- Accept an Invitation
+    - PATCH /v1/invitation/{id}
+
+### Notification Router [JWT]
+
+- Create a Notification
+    - POST /v1/user/notification
+- Get a Notification
+    - GET /v1/user/notification/{id}
+- List Notifications
+    - GET /v1/user/notification
+- Update a Notification
+    - PUT /v1/user/notification/{id}
+    - PUT /v1/user/notification
+        - Bulk processing of updates.
+- Delete a Notification
+    - DELETE /v1/user/notification/{id}
+    - DELETE /v1/user/notification
+        - Bulk processing of updates
+- Search Notifications
+    - POST /v1/user/notification/search
+
+### API Key Router [JWT]
+
+- Create an API Key
+    - POST /v1/key
+- Get an API Key
+    - GET /v1/key/{id}
+- List API Keys
+    - GET /v1/key
+- Update an API Key
+    - PUT /v1/key/{id}
+    - PUT /v1/key
+        - Bulk processing of updates.
+- Delete an API Key
+    - DELETE /v1/key/{id}
+    - DELETE /v1/key
+        - Bulk processing of updates
+- Generate API Key
+    - !POST /v1/key/generate
+        - Generates a new API key
+- Validate API Key
+    - !POST /v1/api/validate
+        - Validates an API key
+- Search API Keys
+    - POST /v1/key/search
+
+### User Merge Router [JWT]
+
+- Merge Users
+    - !POST /v1/user/merge
+        - Merges two user accounts
+
+
 ## Conversations Domain
 
 ### Conversation Router [JWT]
@@ -145,254 +301,6 @@
 - Search Projects
     - POST /v1/project/search
 
-## Agent Domain
-
-### Agent Router [JWT]
-
-- Create an Agent
-    - POST /v1/agent
-    - POST /v1/team/{team_id}/agent
-- Get an Agent
-    - GET /v1/agent/{id}
-- List Agents
-    - GET /v1/agent
-    - GET /v1/team/{team_id}/agent
-- Update an Agent
-    - PUT /v1/agent/{id}
-    - PUT /v1/agent
-        - Bulk processing of updates.
-- Delete an Agent
-    - DELETE /v1/agent/{id}
-    - DELETE /v1/agent
-        - Bulk processing of updates
-- Invoke an Agent
-    - !POST /v1/agent/{id}/prompt
-        - Sends a prompt to a specific agent and gets a response
-    - !POST /v1/agent/{id}/transcribe
-        - Transcribes audio using the agent's provider
-- List Enabled Abilities for an Agent
-    - GET /v1/agent/{agent_id}/ability
-- Search Agents
-    - POST /v1/agent/search
-
-### Provider Instance Agent Router [JWT]
-
-- Create a Provider Instance Agent
-    - POST /v1/provider/instance/{instance_id}/agent
-- Get a Provider Instance Agent
-    - GET /v1/provider/instance/{instance_id}/agent/{id}
-- List Provider Instance Agents
-    - GET /v1/provider/instance/{instance_id}/agent
-- Update a Provider Instance Agent
-    - PUT /v1/provider/instance/{instance_id}/agent/{id}
-    - PUT /v1/provider/instance/{instance_id}/agent
-        - Bulk processing of updates.
-- Delete a Provider Instance Agent
-    - DELETE /v1/provider/instance/{instance_id}/agent/{id}
-    - DELETE /v1/provider/instance/{instance_id}/agent
-        - Bulk processing of updates
-- Search Provider Instance Agents
-    - POST /v1/provider/instance/{instance_id}/agent/search
-
-### Provider Instance Agent Ability Router [JWT]
-
-- Create a Provider Instance Agent Ability
-    - POST /v1/provider/instance/{instance_id}/agent/{agent_id}/ability
-- Get a Provider Instance Agent Ability
-    - GET /v1/provider/instance/{instance_id}/agent/{agent_id}/ability/{id}
-- List Provider Instance Agent Abilities
-    - GET /v1/provider/instance/{instance_id}/agent/{agent_id}/ability
-- Update a Provider Instance Agent Ability
-    - PUT /v1/provider/instance/{instance_id}/agent/{agent_id}/ability/{id}
-    - PUT /v1/provider/instance/{instance_id}/agent/{agent_id}/ability
-        - Bulk processing of updates.
-- Delete a Provider Instance Agent Ability
-    - DELETE /v1/provider/instance/{instance_id}/agent/{agent_id}/ability/{id}
-    - DELETE /v1/provider/instance/{instance_id}/agent/{agent_id}/ability
-        - Bulk processing of updates
-- Search Provider Instance Agent Abilities
-    - POST /v1/provider/instance/{instance_id}/agent/{agent_id}/ability/search
-
-## Authentication Domain
-
-### User Router 
-
-- Create (Register) a User [None / Basic]
-    - POST /v1/user
-- Login a User [Basic]
-    - !POST /v1/user/authorize
-        - Authenticates a user and returns a JWT token.
-- Get a User
-	- !GET /v1/user
-		- Gets the requesting user (singular), as opposed to a list.
-    - GET /v1/user/{id}
-- List Users
-    - GET /v1/team/{team_id}/user
-	    - Listing all users the requester has access to without a `team_id` is not supported.
-- Update a User
-    - PUT /v1/user/{id}
-    - !PUT /v1/user
-        - Updates the requesting user (singular), as opposed to bulk processing.
-- Change User Password
-    - !PATCH /v1/user
-        - Changes the current user's password.
-- Verify Authorization
-    - !GET /v1
-        - Verifies a JWT or API Key is valid (for something), and returns a 204 status if so, and a 401 if not. 
-
-### Team Router [JWT]
-
-- Create a Team
-    - POST /v1/team
-    - POST /v1/team/{team_id}/team
-- Get a Team
-    - GET /v1/team/{id}
-- List Teams
-    - GET /v1/team
-    - GET /v1/team/{team_id}/team
-- Update a Team
-    - PUT /v1/team/{id}
-    - PUT /v1/team
-        - Bulk processing of updates.
-- Delete a Team
-    - DELETE /v1/team/{id}
-    - DELETE /v1/team
-        - Bulk processing of updates
-- Get Team Users
-    - !GET /v1/team/{id}/user
-        - Retrieves users in a team
-- Update User Role in Team
-    - !PUT /v1/team/{id}/user/{user_id}/role
-- Search Teams
-    - POST /v1/team/search
-
-### Invitation Router [JWT]
-
-- Create an Invitation
-    - POST /v1/invitation
-    - POST /v1/team/{team_id}/invitation
-- Get an Invitation
-    - GET /v1/invitation/{id}
-- List Invitations
-    - GET /v1/invitation
-    - GET /v1/team/{team_id}/invitation
-- Update an Invitation
-    - PUT /v1/invitation/{id}
-    - PUT /v1/invitation
-        - Bulk processing of updates.
-- Delete an Invitation
-    - DELETE /v1/invitation/{id}
-    - DELETE /v1/invitation
-        - Bulk processing of updates
-    - !DELETE /v1/team/{team_id}/invitation
-        - Revokes ALL open invitations.
-- Search Invitations
-    - POST /v1/invitation/search
-
-### Notification Router [JWT]
-
-- Create a Notification
-    - POST /v1/user/notification
-- Get a Notification
-    - GET /v1/user/notification/{id}
-- List Notifications
-    - GET /v1/user/notification
-- Update a Notification
-    - PUT /v1/user/notification/{id}
-    - PUT /v1/user/notification
-        - Bulk processing of updates.
-- Delete a Notification
-    - DELETE /v1/user/notification/{id}
-    - DELETE /v1/user/notification
-        - Bulk processing of updates
-- Search Notifications
-    - POST /v1/user/notification/search
-
-### Session Router [JWT]
-
-- Create a Session
-    - POST /v1/session
-    - POST /v1/user/session
-- Get a Session
-    - GET /v1/session/{id}
-- List Sessions
-    - GET /v1/session
-    - GET /v1/user/{user_id}/session
-- Update a Session
-    - PUT /v1/session/{id}
-    - PUT /v1/session
-        - Bulk processing of updates.
-- Revoke a Session
-    - !DELETE /v1/session/{id}
-    - !DELETE /v1/user/{user_id}/session
-        - Revokes ALL active sessions.
-    - DELETE /v1/session
-        - Bulk processing of updates
-- Search Sessions
-    - POST /v1/session/search
-
-### API Key Router [JWT]
-
-- Create an API Key
-    - POST /v1/key
-- Get an API Key
-    - GET /v1/key/{id}
-- List API Keys
-    - GET /v1/key
-- Update an API Key
-    - PUT /v1/key/{id}
-    - PUT /v1/key
-        - Bulk processing of updates.
-- Delete an API Key
-    - DELETE /v1/key/{id}
-    - DELETE /v1/key
-        - Bulk processing of updates
-- Generate API Key
-    - !POST /v1/key/generate
-        - Generates a new API key
-- Validate API Key
-    - !POST /v1/api/validate
-        - Validates an API key
-- Search API Keys
-    - POST /v1/key/search
-
-### User Merge Router [JWT]
-
-- Merge Users
-    - !POST /v1/user/merge
-        - Merges two user accounts
-
-## Completions Domain
-
-### Chat Completions Router [JWT]
-
-- Create Chat Completion
-    - !POST /v1/chat/completions
-        - Creates a chat completion using an OpenAI-compatible API
-
-### Embeddings Router [JWT]
-
-- Create Embeddings
-    - !POST /v1/embeddings
-        - Creates text embeddings using an OpenAI-compatible API
-
-### Audio Router [JWT]
-
-- Create Transcription
-    - !POST /v1/audio/transcriptions
-        - Transcribes audio to text
-- Create Translation
-    - !POST /v1/audio/translations
-        - Translates audio to English text
-- Create Speech
-    - !POST /v1/audio/speech
-        - Converts text to speech audio
-
-### Image Generation Router [JWT]
-
-- Generate Images
-    - !POST /v1/images/generations
-        - Generates images based on a text prompt
 
 ## Providers Domain
 
@@ -471,35 +379,3 @@
         - Bulk processing of updates
 - Search Rotations
     - POST /v1/rotation/search
-
-## Memories Domain
-
-### Memory Router [JWT]
-
-- List Memories for an Agent
-    - !GET /v1/agent/{agent_id}/memory/collection/{collection_id}
-        - Retrieves memories for a specific agent collection
-- Query Memories
-    - !POST /v1/agent/{agent_id}/memory/collection/{collection_id}/query
-        - Queries memories from an agent collection
-- Create a New Memory
-    - !POST /v1/agent/{agent_id}/memory/collection/{collection_id}
-        - Creates a new memory in an agent collection
-- Import Memories
-    - !POST /v1/agent/{agent_id}/memory
-        - Imports memories for an agent
-- Export Memories
-    - !GET /v1/agent/{agent_id}/memory
-        - Exports memories for an agent
-- List External Sources for a Collection
-    - !GET /v1/agent/{agent_id}/memory/collection/{collection_id}/sources
-        - Lists external sources for a memory collection
-- Delete Memories from a Source
-    - !DELETE /v1/agent/{agent_id}/memory/collection/{collection_id}/source/{source}
-        - Deletes memories from a specific source
-- Delete an Entire Memory Collection
-    - !DELETE /v1/agent/{agent_id}/memory/collection/{collection_id}
-        - Deletes an entire memory collection
-- Delete a Specific Memory
-    - !DELETE /v1/agent/{agent_id}/memory/collection/{collection_id}/{memory_id}
-        - Deletes a specific memory

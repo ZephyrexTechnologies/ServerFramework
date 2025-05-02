@@ -12,8 +12,9 @@ from fastapi import (
     Response,
     status,
 )
+from urllib3 import HTTPResponse
 
-from endpoints.AbstractEPRouter import AbstractEPRouter
+from endpoints.AbstractEndpointRouter import AbstractEPRouter
 from endpoints.StaticExampleFactory import ExampleGenerator
 from lib.Environment import env
 from logic.BLL_Auth import (
@@ -23,24 +24,26 @@ from logic.BLL_Auth import (
     InvitationNetworkModel,
     PermissionManager,
     RoleManager,
+    RoleNetworkModel,
     TeamManager,
     TeamMetadataManager,
     TeamNetworkModel,
-    User,
     UserCredentialManager,
     UserManager,
     UserMetadataManager,
+    UserModel,
     UserNetworkModel,
     UserRecoveryQuestionManager,
     UserSessionManager,
     UserSessionNetworkModel,
     UserTeamManager,
+    UserTeamNetworkModel,
 )
 
 
 # Manager factory functions
 def get_user_manager(
-    user: User = Depends(UserManager.auth),
+    user: UserModel = Depends(UserManager.auth),
     target_user_id: Optional[str] = Query(
         None, description="Target user ID for admin operations"
     ),
@@ -50,7 +53,7 @@ def get_user_manager(
 
 
 def get_team_manager(
-    user: User = Depends(UserManager.auth),
+    user: UserModel = Depends(UserManager.auth),
     target_team_id: Optional[str] = Query(
         None, description="Target team ID for admin operations"
     ),
@@ -59,57 +62,57 @@ def get_team_manager(
     return TeamManager(requester_id=user.id, target_team_id=target_team_id)
 
 
-def get_invitation_manager(user: User = Depends(UserManager.auth)):
+def get_invitation_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized Invitation manager instance."""
     return InvitationManager(requester_id=user.id)
 
 
-def get_invitation_invitee_manager(user: User = Depends(UserManager.auth)):
+def get_invitation_invitee_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized InvitationInvitee manager instance."""
     return InvitationInviteeManager(requester_id=user.id)
 
 
-def get_role_manager(user: User = Depends(UserManager.auth)):
+def get_role_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized Role manager instance."""
     return RoleManager(requester_id=user.id)
 
 
-def get_user_team_manager(user: User = Depends(UserManager.auth)):
+def get_user_team_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized UserTeam manager instance."""
     return UserTeamManager(requester_id=user.id)
 
 
-def get_team_metadata_manager(user: User = Depends(UserManager.auth)):
+def get_team_metadata_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized TeamMetadata manager instance."""
     return TeamMetadataManager(requester_id=user.id)
 
 
-def get_user_metadata_manager(user: User = Depends(UserManager.auth)):
+def get_user_metadata_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized UserMetadata manager instance."""
     return UserMetadataManager(requester_id=user.id)
 
 
-def get_user_credential_manager(user: User = Depends(UserManager.auth)):
+def get_user_credential_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized UserCredential manager instance."""
     return UserCredentialManager(requester_id=user.id)
 
 
-def get_recovery_question_manager(user: User = Depends(UserManager.auth)):
+def get_recovery_question_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized UserRecoveryQuestion manager instance."""
     return UserRecoveryQuestionManager(requester_id=user.id)
 
 
-def get_failed_login_manager(user: User = Depends(UserManager.auth)):
+def get_failed_login_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized FailedLoginAttempt manager instance."""
     return FailedLoginAttemptManager(requester_id=user.id)
 
 
-def get_user_session_manager(user: User = Depends(UserManager.auth)):
+def get_user_session_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized UserSession manager instance."""
     return UserSessionManager(requester_id=user.id)
 
 
-def get_permission_manager(user: User = Depends(UserManager.auth)):
+def get_permission_manager(user: UserModel = Depends(UserManager.auth)):
     """Get an initialized Permission manager instance."""
     return PermissionManager(requester_id=user.id)
 
@@ -148,6 +151,17 @@ invitation_examples["get"]["invitation"].update(
     }
 )
 
+
+# Generate examples for Role router
+role_examples = ExampleGenerator.generate_operation_examples(RoleNetworkModel, "role")
+role_examples["get"]["role"].update(
+    {
+        "name": "admin",
+        "friendly_name": "Administrator",
+        "mfa_count": 1,
+        "password_change_frequency_days": 90,
+    }
+)
 
 user_session_examples = ExampleGenerator.generate_operation_examples(
     UserSessionNetworkModel, "user_session"
@@ -347,12 +361,12 @@ async def register_user(
 async def login(
     request: Request,
     authorization: Optional[str] = Header(None),
-    login_data: Optional[UserNetworkModel.Login] = Body(None),
+    # login_data: Optional[UserNetworkModel.Login] = Body(None),
 ):
     """Authenticate a user with credentials"""
     user_manager = UserManager(requester_id=env("ROOT_ID"))
     return user_manager.login(
-        login_data=login_data.model_dump() if login_data else None,
+        # login_data=login_data.model_dump() if login_data else None,
         ip_address=request.headers.get("X-Forwarded-For") or request.client.host,
         req_uri=request.headers.get("Referer"),
         authorization=authorization,
@@ -414,12 +428,35 @@ async def change_password(
     manager=Depends(get_user_manager),
 ):
     """Change the current user's password"""
-    credential_manager = manager.user_credentials
+    credential_manager = manager.credentials
     return credential_manager.change_password(
         user_id=manager.requester.id,
         current_password=current_password,
         new_password=new_password,
     )
+
+
+# Create standalone Role router for /v1/role/{id} GET, PUT, DELETE
+role_router = AbstractEPRouter(
+    prefix="/v1/role",
+    tags=["Role Management"],
+    manager_factory=get_role_manager,
+    network_model_cls=RoleNetworkModel,
+    resource_name="role",
+    example_overrides=role_examples,
+    routes_to_register=["get", "update", "delete"],  # Only these operations
+)
+
+# Create nested router for Role under Team for /v1/team/{team_id}/role POST, GET
+team_role_router = team_router.create_nested_router(
+    parent_prefix="/v1/team",
+    parent_param_name="team_id",
+    child_resource_name="role",
+    manager_property="roles",  # Assuming TeamManager has a 'roles' property
+    child_network_model_cls=RoleNetworkModel,
+    tags=["Role Management"],
+    routes_to_register=["create", "list", "search"],  # Add search
+)
 
 
 # Root level authorization verification endpoint
@@ -455,22 +492,16 @@ async def verify_authorization(
     "/{id}/user",
     summary="Get team users",
     description="Gets users belonging to a team.",
-    response_model=UserNetworkModel.ResponsePlural,
+    response_model=UserTeamNetworkModel.ResponsePlural,
     status_code=status.HTTP_200_OK,
 )
 async def get_team_users(
     id: str = Path(..., description="Team ID"),
     manager=Depends(get_team_manager),
 ):
-    """Get users belonging to a team."""
-    # Verify team exists
-    team = manager.get(id=id)
-
-    # Get users for team using the manager
-    # FIXME: manager does not have a get_team_users() method
-    users = manager.get_team_users(team_id=id)
-
-    return UserNetworkModel.ResponsePlural(users=users)
+    return UserTeamNetworkModel.ResponsePlural(
+        user_teams=manager.user_teams.list(team_id=id, include=["users"])
+    )
 
 
 @team_router.put(
@@ -491,8 +522,9 @@ async def update_user_role(
     team = manager.get(id=id)
 
     # Update the user's role using team manager
-    manager.update_user_role(team_id=id, user_id=user_id, role_id=role_id)
+    existing_role = manager.user_teams.get(team_id=id, user_id=user_id)
 
+    manager.user_teams.update(role_id=role_id, id=existing_role.id)
     return {"message": "Role updated successfully"}
 
 
@@ -501,21 +533,57 @@ async def update_user_role(
     "",
     summary="Revoke all invitations",
     description="Revokes ALL open invitations for a team.",
-    response_model=Dict[str, Any],
-    status_code=status.HTTP_200_OK,
+    # response_model=Dict[str, Any],
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 async def revoke_all_invitations(
     team_id: str = Path(..., description="Team ID"),
     manager=Depends(get_invitation_manager),
 ):
     """Revoke all invitations for a team"""
-    count = manager.revoke_all_team_invitations(team_id=team_id)
-    return {"message": "All invitations revoked", "count": count}
+    manager.batch_delete(ids=[team.id for team in manager.list(team_id=team_id)])
+    return HTTPResponse(status=204)
 
 
-# Session management
+# Session router endpoints
+@session_router.get(
+    "/{id}",
+    summary="Get session details",
+    description="Gets a specific user session.",
+    response_model=UserSessionNetworkModel.ResponseSingle,
+    status_code=status.HTTP_200_OK,
+)
+async def get_session(
+    id: str = Path(..., description="Session ID"),
+    manager=Depends(get_user_session_manager),
+):
+    """Get a user session"""
+    return UserSessionNetworkModel.ResponseSingle(user_session=manager.get(id=id))
+
+
+@session_router.get(
+    "",
+    summary="List sessions",
+    description="Lists user sessions with optional filtering.",
+    response_model=UserSessionNetworkModel.ResponsePlural,
+    status_code=status.HTTP_200_OK,
+)
+async def list_sessions(
+    manager=Depends(get_user_session_manager),
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum items to return"),
+):
+    """List user sessions"""
+    return UserSessionNetworkModel.ResponsePlural(
+        user_sessions=manager.list(
+            offset=offset,
+            limit=limit,
+        )
+    )
+
+
 @session_router.delete(
-    "/{id}/revoke",
+    "/{id}",
     summary="Revoke session",
     description="Revokes a user session.",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -529,21 +597,54 @@ async def revoke_session(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@user_session_router.delete(
-    "",
-    summary="Revoke all user sessions",
-    description="Revokes ALL active sessions for a user.",
-    status_code=status.HTTP_204_NO_CONTENT,
+# User session router endpoints
+@user_session_router.get(
+    "/{id}",
+    summary="Get user session",
+    description="Gets a specific session for a user.",
+    response_model=UserSessionNetworkModel.ResponseSingle,
+    status_code=status.HTTP_200_OK,
 )
-async def revoke_all_sessions(
+async def get_user_session(
     user_id: str = Path(..., description="User ID"),
+    id: str = Path(..., description="Session ID"),
     manager=Depends(get_user_session_manager),
 ):
-    """Revoke all sessions for a user"""
-    count = manager.revoke_sessions(user_id=user_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    """Get a specific session for a user"""
+    session = manager.get(id=id)
+    if session.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session with ID '{id}' not found for user '{user_id}'",
+        )
+    return UserSessionNetworkModel.ResponseSingle(user_session=session)
 
 
+@user_session_router.get(
+    "",
+    summary="List user sessions",
+    description="Lists all sessions for a user.",
+    response_model=UserSessionNetworkModel.ResponsePlural,
+    status_code=status.HTTP_200_OK,
+)
+async def list_user_sessions(
+    user_id: str = Path(..., description="User ID"),
+    manager=Depends(get_user_session_manager),
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum items to return"),
+):
+    """List all sessions for a user"""
+    return UserSessionNetworkModel.ResponsePlural(
+        user_sessions=manager.list(
+            user_id=user_id,
+            offset=offset,
+            limit=limit,
+        )
+    )
+
+
+# Placeholder Test Class (adjust imports and base class as needed)
+# from tests.base import BaseTestCRUD  # Assuming this exists
 # Create a merged router to include all auth endpoints
 router = APIRouter()
 
@@ -559,7 +660,12 @@ all_routers = [
     team_metadata_router,
     user_metadata_router,
     user_session_router,
+    role_router,
+    team_role_router,
 ]
 
 for endpoint_router in all_routers:
     router.include_router(endpoint_router)
+# Note: Adding test classes directly to endpoint files is unconventional.
+# Consider moving this to a dedicated test file in the 'tests' directory.
+# Also, ensure the BaseTestCRUD class and necessary fixtures/setup exist.

@@ -1,7 +1,7 @@
 import logging
 import secrets
 import string
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import bcrypt
@@ -26,9 +26,9 @@ from database.DB_Auth import (
     UserRecoveryQuestion,
     UserTeam,
 )
-from lib.Dependencies import jwt
 from lib.Environment import env
-from logic.AbstractBLLManager import (
+from lib.Import import jwt
+from logic.AbstractLogicManager import (
     AbstractBLLManager,
     BaseMixinModel,
     DateSearchModel,
@@ -41,7 +41,9 @@ from logic.AbstractBLLManager import (
 )
 
 
-class UserModel(BaseMixinModel, UpdateMixinModel, ImageMixinModel.Optional):
+class UserModel(
+    BaseMixinModel.Optional, UpdateMixinModel.Optional, ImageMixinModel.Optional
+):
     model_config = {"extra": "ignore", "populate_by_name": True}
     email: Optional[str] = Field(description="User's email address")
     username: Optional[str] = Field(description="User's username")
@@ -50,6 +52,11 @@ class UserModel(BaseMixinModel, UpdateMixinModel, ImageMixinModel.Optional):
     last_name: Optional[str] = Field(description="User's last name")
     mfa_count: Optional[int] = Field(description="Number of MFA verifications required")
     active: Optional[bool] = Field(description="Whether the user is active")
+
+    # Add a get method to support dictionary-like access for tests
+    def get(self, field_name, default=None):
+        """Dictionary-like accessor for attributes"""
+        return getattr(self, field_name, default)
 
     class ReferenceID:
         user_id: str = Field(..., description="The ID of the related user")
@@ -162,12 +169,12 @@ class UserManager(AbstractBLLManager):
             target_team_id=target_team_id,
             db=db,
         )
-        self._user_credentials = None
-        self._user_metadata = None
-        self._user_mfa_methods = None
+        self._credentials = None
+        self._metadata = None
+        self._mfa_methods = None
         self._failed_logins = None
         self._user_teams = None
-        self._user_session_manager = None
+        self._sessions = None
 
     def _register_search_transformers(self):
         self.register_search_transformer("name", self._transform_name_search)
@@ -187,36 +194,24 @@ class UserManager(AbstractBLLManager):
         ]
 
     @property
-    def user_credentials(self):
-        if self._user_credentials is None:
-            self._user_credentials = UserCredentialManager(
+    def credentials(self):
+        if self._credentials is None:
+            self._credentials = UserCredentialManager(
                 requester_id=self.requester.id,
                 target_user_id=self.target_user_id,
                 db=self.db,
             )
-        return self._user_credentials
+        return self._credentials
 
     @property
-    def user_metadata(self):
-        if self._user_metadata is None:
-            self._user_metadata = UserMetadataManager(
+    def metadata(self):
+        if self._metadata is None:
+            self._metadata = UserMetadataManager(
                 requester_id=self.requester.id,
                 target_user_id=self.target_user_id,
                 db=self.db,
             )
-        return self._user_metadata
-
-    @property
-    def user_mfa_methods(self):
-        if self._user_mfa_methods is None:
-            from extensions.mfa.BLL_MFA import UserMFAMethodManager
-
-            self._user_mfa_methods = UserMFAMethodManager(
-                requester_id=self.requester.id,
-                target_user_id=self.target_user_id,
-                db=self.db,
-            )
-        return self._user_mfa_methods
+        return self._metadata
 
     @property
     def failed_logins(self):
@@ -239,37 +234,44 @@ class UserManager(AbstractBLLManager):
         return self._user_teams
 
     @property
-    def user_session_manager(self):
-        if self._user_session_manager is None:
-            self._user_session_manager = UserSessionManager(
+    def sessions(self):
+        if self._sessions is None:
+            self._sessions = UserSessionManager(
                 requester_id=self.requester.id,
                 target_user_id=self.target_user_id,
                 db=self.db,
             )
-        return self._user_session_manager
+        return self._sessions
 
     def createValidation(self, entity):
         """Validates the entity before creation"""
-        if User.exists(requester_id=self.requester.id, db=self.db, email=entity.email):
-            raise HTTPException(status_code=400, detail="Email already in use")
-
-        if entity.username and User.exists(
-            requester_id=self.requester.id, db=self.db, username=entity.username
+        if User.exists(requester_id=env("ROOT_ID"), db=self.db, email=entity.email):
+            raise HTTPException(status_code=409, detail="Email already in use")
+        if User.exists(
+            requester_id=env("ROOT_ID"), db=self.db, username=entity.username
         ):
-            raise HTTPException(status_code=400, detail="Username already in use")
+            raise HTTPException(status_code=409, detail="Username already in use")
 
     def create(self, **kwargs):
         """Create a user with optional metadata"""
+
         # Extract metadata fields (non-model fields)
         password = kwargs.pop("password", None)
         if not password:
-            raise HTTPException(status_code=400, detail="Password is required")
+            raise HTTPException(
+                status_code=422, detail="Password is required for registration."
+            )
 
         metadata_fields = {}
         model_fields = {}
 
         # Get the model fields for comparison
         model_fields_set = set(self.Model.__annotations__.keys())
+        # Add fields from mixins that might not be in annotations
+        model_fields_set.add(
+            "image_url"
+        )  # Make sure image_url is recognized as a model field
+
         for key, value in kwargs.items():
             if key in model_fields_set or key == "password":
                 model_fields[key] = value
@@ -282,19 +284,20 @@ class UserManager(AbstractBLLManager):
         # Create metadata if provided
         if metadata_fields and user:
             for key, value in metadata_fields.items():
-                self.user_metadata.create(
+                self.metadata.create(
                     user_id=user.id,
                     key=key,
                     value=str(value),
                 )
 
-        super().__init__(
-            requester_id=user.id,
+        # Create credentials for the user without changing the requester_id
+        credentials_manager = UserCredentialManager(
+            requester_id=self.requester.id,
             target_user_id=user.id,
             target_team_id=self.target_team_id,
             db=self.db,
         )
-        self.user_credentials.create(user_id=user.id, password=password)
+        credentials_manager.create(user_id=user.id, password=password)
         return user
 
     def update(self, id: str, **kwargs):
@@ -316,19 +319,19 @@ class UserManager(AbstractBLLManager):
 
         # Update metadata if provided
         if metadata_fields and user:
-            existing_metadata = self.user_metadata.list(user_id=id)
+            existing_metadata = self.metadata.list(user_id=id)
             existing_metadata_dict = {item.key: item for item in existing_metadata}
 
             for key, value in metadata_fields.items():
                 if key in existing_metadata_dict:
                     # Update existing metadata
-                    self.user_metadata.update(
+                    self.metadata.update(
                         id=existing_metadata_dict[key].id,
                         value=str(value),
                     )
                 else:
                     # Create new metadata
-                    self.user_metadata.create(
+                    self.metadata.create(
                         user_id=id,
                         key=key,
                         value=str(value),
@@ -339,12 +342,12 @@ class UserManager(AbstractBLLManager):
     @staticmethod
     def generate_jwt_token(user_id: str, email: str, expiration_hours: int = 24) -> str:
         """Generate a JWT token for authentication"""
-        expiration = datetime.utcnow() + timedelta(hours=expiration_hours)
+        expiration = datetime.now(timezone.utc) + timedelta(hours=expiration_hours)
         payload = {
             "sub": user_id,
             "email": email,
             "exp": expiration,
-            "iat": datetime.utcnow(),
+            "iat": datetime.now(timezone.utc),
         }
         return jwt.encode(payload, env("JWT_SECRET"), algorithm="HS256")
 
@@ -390,7 +393,7 @@ class UserManager(AbstractBLLManager):
             )
 
     @staticmethod
-    def auth(authorization: str = Header(None), request: Request = None) -> User:
+    def auth(authorization: str = Header(None), request: Request = None) -> UserModel:
         """Authenticate a user from Authorization header"""
         if not authorization:
             raise HTTPException(
@@ -463,16 +466,15 @@ class UserManager(AbstractBLLManager):
 
                     identifier, password = auth_decoded.split(":", 1)
 
-                    # Try to find user by email or username
-                    user = (
-                        db.query(User)
-                        .filter(
+                    user = User.get(
+                        filters=[
                             or_(
                                 User.email == identifier,
                                 User.username == identifier,
                             )
-                        )
-                        .first()
+                        ],
+                        return_type="dto",
+                        override_dto=UserModel,
                     )
 
                     if not user:
@@ -486,13 +488,11 @@ class UserManager(AbstractBLLManager):
                         )
 
                     # Get current credential (password_changed is NULL for current password)
-                    credentials = (
-                        db.query(UserCredential)
-                        .filter(
+                    credentials = UserCredential.get(
+                        filters=[
                             UserCredential.user_id == user.id,
                             UserCredential.password_changed == None,
-                        )
-                        .first()
+                        ]
                     )
 
                     if not credentials:
@@ -505,15 +505,13 @@ class UserManager(AbstractBLLManager):
                         password.encode(), credentials.password_hash.encode()
                     ):
                         # Check if there is an older password that matches
-                        old_credentials = (
-                            db.query(UserCredential)
-                            .filter(
+                        old_credentials = UserCredential.list(
+                            filters=[
                                 UserCredential.user_id == user.id,
                                 UserCredential.password_changed != None,
-                            )
-                            .order_by(UserCredential.password_changed.desc())
-                            .first()
-                        )
+                            ],
+                            order_by=[UserCredential.password_changed.desc()],
+                        )[0]
 
                         if old_credentials and bcrypt.checkpw(
                             password.encode(),
@@ -579,7 +577,7 @@ class UserManager(AbstractBLLManager):
         if db is None:
             db = get_session()
 
-        system_id = env("SYSTEM_ID")
+        root_id = env("ROOT_ID")
 
         # Extract credentials from Basic Auth header if provided
         if authorization and authorization.startswith("Basic "):
@@ -623,7 +621,7 @@ class UserManager(AbstractBLLManager):
         user = user[0]
 
         # Check for too many failed login attempts
-        one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
         failed_login_count = FailedLoginAttempt.count(
             requester_id=user["id"],
             db=db,
@@ -694,7 +692,7 @@ class UserManager(AbstractBLLManager):
             from extensions.mfa.BLL_MFA import UserMFAMethodManager
 
             mfa_methods = UserMFAMethod.list(
-                requester_id=system_id,
+                requester_id=root_id,
                 db=db,
                 user_id=user.id,
                 is_enabled=True,
@@ -702,7 +700,7 @@ class UserManager(AbstractBLLManager):
 
             if not mfa_methods:
                 FailedLoginAttempt.create(
-                    requester_id=system_id,
+                    requester_id=root_id,
                     db=db,
                     user_id=user.id,
                     ip_address=ip_address,
@@ -713,7 +711,7 @@ class UserManager(AbstractBLLManager):
             valid_mfa = False
             for method in mfa_methods:
                 method_manager = UserMFAMethodManager(
-                    requester_id=system_id,
+                    requester_id=root_id,
                     target_user_id=user.id,
                     db=db,
                 )
@@ -721,13 +719,13 @@ class UserManager(AbstractBLLManager):
                     valid_mfa = True
                     method_manager.update(
                         id=method.id,
-                        last_used=datetime.utcnow(),
+                        last_used=datetime.now(timezone.utc),
                     )
                     break
 
             if not valid_mfa:
                 FailedLoginAttempt.create(
-                    requester_id=system_id,
+                    requester_id=root_id,
                     db=db,
                     user_id=user.id,
                     ip_address=ip_address,
@@ -747,16 +745,16 @@ class UserManager(AbstractBLLManager):
         # Create session
         session_key = secrets.token_hex(16)
         AuthSession.create(
-            requester_id=system_id,
+            requester_id=root_id,
             db=db,
             user_id=user["id"],
             session_key=session_key,
-            jwt_issued_at=datetime.utcnow(),
+            jwt_issued_at=datetime.now(timezone.utc),
             device_type="web",
             browser="unknown",
             is_active=True,
-            last_activity=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(days=30),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
             revoked=False,
             trust_score=50,
         )
@@ -765,7 +763,7 @@ class UserManager(AbstractBLLManager):
         preferences = {}
         try:
             metadata_items = UserMetadata.list(
-                requester_id=system_id, db=db, user_id=user["id"]
+                requester_id=root_id, db=db, user_id=user["id"]
             )
             preferences = {item.key: item.value for item in metadata_items}
         except Exception:
@@ -773,7 +771,7 @@ class UserManager(AbstractBLLManager):
 
         # Get user teams with roles
         user_teams = UserTeam.list(
-            requester_id=system_id,
+            requester_id=root_id,
             db=db,
             user_id=user["id"],
             enabled=True,
@@ -781,17 +779,17 @@ class UserManager(AbstractBLLManager):
 
         teams_with_roles = []
         for user_team in user_teams:
-            team = Team.get(requester_id=system_id, db=db, id=user_team.team_id)
+            team = Team.get(requester_id=root_id, db=db, id=user_team["team_id"])
 
-            role = Role.get(requester_id=system_id, db=db, id=user_team.role_id)
+            role = Role.get(requester_id=root_id, db=db, id=user_team["role_id"])
 
             teams_with_roles.append(
                 {
-                    "id": team.id,
-                    "name": team.name,
-                    "description": team.description,
-                    "role_id": user_team.role_id,
-                    "role_name": role.name if role else None,
+                    "id": team["id"],
+                    "name": team["name"],
+                    "description": team["description"],
+                    "role_id": user_team["role_id"],
+                    "role_name": role["name"] if role else None,
                 }
             )
 
@@ -831,7 +829,7 @@ class UserManager(AbstractBLLManager):
         )
 
 
-class UserCredentialModel(BaseMixinModel, UserModel.ReferenceID):
+class UserCredentialModel(BaseMixinModel.Optional, UserModel.ReferenceID):
     password_hash: Optional[str] = Field(None, description="Hashed password")
     password_changed_at: Optional[datetime] = Field(
         None, description="When password was last changed"
@@ -855,7 +853,7 @@ class UserCredentialModel(BaseMixinModel, UserModel.ReferenceID):
         password: str = Field(None, description="New password (will be hashed)")
 
     class Update(BaseModel):
-        # TODO This model and entity should not be updatable.
+        # This model and entity should not be manually updatable, only via the User password change function.
         pass
 
     class Search(BaseMixinModel.Search, UserModel.ReferenceID.Search):
@@ -894,7 +892,6 @@ class UserCredentialManager(AbstractBLLManager):
 
     def create(self, **kwargs):
         """Create new user credentials (password)"""
-        # TODO Implement this without try/catch, update on the filter?
         try:
             UserCredential.update(
                 requester_id=self.requester.id,
@@ -907,7 +904,7 @@ class UserCredentialManager(AbstractBLLManager):
                     user_id=kwargs.get("user_id"),
                     filters=[UserCredential.password_changed == None],
                 ).id,
-                new_properties={"password_changed": datetime.utcnow()},
+                new_properties={"password_changed": datetime.now(timezone.utc)},
             )
         except:
             pass  # No previous password found to update.
@@ -975,7 +972,7 @@ class UserCredentialManager(AbstractBLLManager):
         credential_id = (
             credential["id"] if isinstance(credential, dict) else credential.id
         )
-        self.update(id=credential_id, password_changed=datetime.utcnow())
+        self.update(id=credential_id, password_changed=datetime.now(timezone.utc))
 
         # Create a new credential entry with the new password
         self.create(user_id=user_id, password=new_password)
@@ -1086,7 +1083,7 @@ class UserRecoveryQuestionManager(AbstractBLLManager):
         return bcrypt.checkpw(normalized_answer.encode(), question.answer.encode())
 
 
-class FailedLoginAttemptModel(BaseMixinModel, UserReferenceModel):
+class FailedLoginAttemptModel(BaseMixinModel.Optional, UserReferenceModel.Optional):
     ip_address: Optional[str] = Field(
         None, description="IP address of the failed login attempt"
     )
@@ -1153,12 +1150,12 @@ class FailedLoginAttemptManager(AbstractBLLManager):
         if not hours or not isinstance(hours, int):
             hours = 1
 
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         return [FailedLoginAttempt.created_at >= cutoff_time]
 
     def count_recent(self, user_id: str, hours: int = 1) -> int:
         """Count recent failed login attempts for a user"""
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         return FailedLoginAttempt.count(
             requester_id=self.requester.id,
@@ -1176,14 +1173,16 @@ class FailedLoginAttemptManager(AbstractBLLManager):
 
 
 class TeamModel(
-    BaseMixinModel,
-    UpdateMixinModel,
+    BaseMixinModel.Optional,
+    UpdateMixinModel.Optional,
     ParentMixinModel.Optional,
-    NameMixinModel,
+    NameMixinModel.Optional,
     ImageMixinModel.Optional,
 ):
     description: Optional[str] = Field(None, description="Team description")
-    encryption_key: str = Field(..., description="Encryption key for team data")
+    encryption_key: Optional[str] = Field(
+        ..., description="Encryption key for team data"
+    )
     token: Optional[str] = Field(None, description="Team token")
     training_data: Optional[str] = Field(None, description="Training data for team")
 
@@ -1266,30 +1265,42 @@ class TeamManager(AbstractBLLManager):
             target_team_id=target_team_id,
             db=db,
         )
-        self._team_metadata_manager = None
-        self._user_team_manager = None
+        self._team_metadata = None
+        self._user_teams = None
+        self._roles = None  # Initialize roles property
 
     @property
-    def team_metadata_manager(self):
+    def team_metadata(self):
         """Get the team metadata manager"""
-        if self._team_metadata_manager is None:
-            self._team_metadata_manager = TeamMetadataManager(
+        if self._team_metadata is None:
+            self._team_metadata = TeamMetadataManager(
                 requester_id=self.requester.id,
                 target_team_id=self.target_team_id,
                 db=self.db,
             )
-        return self._team_metadata_manager
+        return self._team_metadata
 
     @property
-    def user_team_manager(self):
+    def user_teams(self):
         """Get the user team manager"""
-        if self._user_team_manager is None:
-            self._user_team_manager = UserTeamManager(
+        if self._user_teams is None:
+            self._user_teams = UserTeamManager(
                 requester_id=self.requester.id,
                 target_team_id=self.target_team_id,
                 db=self.db,
             )
-        return self._user_team_manager
+        return self._user_teams
+
+    @property
+    def roles(self):
+        """Get the role manager"""
+        if self._roles is None:
+            self._roles = RoleManager(
+                requester_id=self.requester.id,
+                target_team_id=self.target_team_id,
+                db=self.db,
+            )
+        return self._roles
 
     def createValidation(self, entity):
         """Validate team creation"""
@@ -1309,7 +1320,7 @@ class TeamManager(AbstractBLLManager):
 
         # Get the model fields for comparison
         model_fields_set = set(self.Model.Create.__annotations__.keys())
-        # TODO Add fields from mixins dynamically that might not be in annotations
+        # TODO #51 Add fields from mixins dynamically that might not be in annotations
         model_fields_set.add("name")
         model_fields_set.add("parent_id")
         model_fields_set.add("description")
@@ -1325,25 +1336,26 @@ class TeamManager(AbstractBLLManager):
         if "encryption_key" not in model_fields:
             model_fields["encryption_key"] = secrets.token_hex(32)
 
-        # Create the team
+        # Create the team first
         team = super().create(**model_fields)
 
-        # Create metadata if provided
-        if metadata_fields and team:
-            for key, value in metadata_fields.items():
-                self.team_metadata_manager.create(
-                    team_id=team.id,
-                    key=key,
-                    value=str(value),
-                )
+        # Only proceed with metadata and associations if team creation succeeded
+        if team:
+            # Create metadata if provided
+            if metadata_fields:
+                for key, value in metadata_fields.items():
+                    self.team_metadata.create(
+                        team_id=team.id,
+                        key=key,
+                        value=str(value),
+                    )
 
-        UserTeamManager(
-            requester_id=env("ROOT_ID")
-        ).create(  # Must create with Root ID or can't see Team (yet).
-            team_id=team.id,
-            user_id=self.requester.id,
-            role_id="FFFFFFFF-FFFF-FFFF-AAAA-FFFFFFFFFFFF",  # Admin
-        )
+            # Add the creator as an admin of the team
+            UserTeamManager(
+                requester_id=env("ROOT_ID")
+            ).create(  # Must create with Root ID or can't see Team (yet).
+                team_id=team.id, user_id=self.requester.id, role_id=env("ADMIN_ROLE_ID")
+            )
 
         return team
 
@@ -1355,7 +1367,7 @@ class TeamManager(AbstractBLLManager):
 
         # Get the model fields for comparison
         model_fields_set = set(self.Model.Update.__annotations__.keys())
-        # TODO Add fields from mixins dynamically that might not be in annotations
+        # TODO #51 Add fields from mixins dynamically that might not be in annotations
         model_fields_set.add("name")
         model_fields_set.add("parent_id")
         model_fields_set.add("description")
@@ -1371,19 +1383,19 @@ class TeamManager(AbstractBLLManager):
 
         # Update metadata if provided
         if metadata_fields and team:
-            existing_metadata = self.team_metadata_manager.list(team_id=id)
+            existing_metadata = self.team_metadata.list(team_id=id)
             existing_metadata_dict = {item.key: item for item in existing_metadata}
 
             for key, value in metadata_fields.items():
                 if key in existing_metadata_dict:
                     # Update existing metadata
-                    self.team_metadata_manager.update(
+                    self.team_metadata.update(
                         id=existing_metadata_dict[key].id,
                         value=str(value),
                     )
                 else:
                     # Create new metadata
-                    self.team_metadata_manager.create(
+                    self.team_metadata.create(
                         team_id=id,
                         key=key,
                         value=str(value),
@@ -1403,8 +1415,10 @@ class TeamManager(AbstractBLLManager):
         return {item.key: item.value for item in metadata_items}
 
 
-class TeamMetadataModel(BaseMixinModel, UpdateMixinModel, TeamReferenceModel):
-    key: str = Field(..., description="Metadata key")
+class TeamMetadataModel(
+    BaseMixinModel.Optional, UpdateMixinModel.Optional, TeamReferenceModel.Optional
+):
+    key: Optional[str] = Field(..., description="Metadata key")
     value: Optional[str] = Field(None, description="Metadata value")
 
     class ReferenceID:
@@ -1557,6 +1571,7 @@ class RoleManager(AbstractBLLManager):
     NetworkModel = RoleNetworkModel
     DBClass = Role
 
+    # TODO if a role is deleted, all users with that role should fall back to the role from which it inherits.
     def _register_search_transformers(self):
         self.register_search_transformer("is_system", self._transform_is_system_search)
 
@@ -1657,8 +1672,10 @@ class UserTeamManager(AbstractBLLManager):
             raise HTTPException(status_code=404, detail="Role not found")
 
 
-class UserMetadataModel(BaseMixinModel, UpdateMixinModel, UserReferenceModel):
-    key: str = Field(..., description="Metadata key")
+class UserMetadataModel(
+    BaseMixinModel.Optional, UpdateMixinModel.Optional, UserReferenceModel.Optional
+):
+    key: Optional[str] = Field(None, description="Metadata key")
     value: Optional[str] = Field(None, description="Metadata value")
 
     class ReferenceID:
@@ -1796,7 +1813,7 @@ class UserMetadataManager(AbstractBLLManager):
         return result
 
 
-class PermissionModel(BaseMixinModel, UpdateMixinModel):
+class PermissionModel(BaseMixinModel.Optional, UpdateMixinModel.Optional):
     resource_type: str = Field(..., description="Type of resource")
     resource_id: str = Field(..., description="ID of the resource")
     user_id: Optional[str] = Field(
@@ -1949,10 +1966,14 @@ class PermissionManager(AbstractBLLManager):
             raise HTTPException(status_code=404, detail="Role not found")
 
 
-class InvitationModel(BaseMixinModel, UpdateMixinModel, TeamReferenceModel):
+class InvitationModel(
+    BaseMixinModel.Optional,
+    UpdateMixinModel.Optional,
+    UserReferenceModel.Optional,
+    TeamReferenceModel.Optional,
+    RoleReferenceModel.Optional,
+):
     code: Optional[str] = Field(None, description="Invitation code")
-    role_id: str = Field(..., description="Role ID to assign")
-    inviter_id: str = Field(..., description="User ID of the inviter")
     max_uses: Optional[int] = Field(None, description="Maximum number of uses allowed")
     expires_at: Optional[datetime] = Field(None, description="Expiration date/time")
 
@@ -1974,7 +1995,7 @@ class InvitationModel(BaseMixinModel, UpdateMixinModel, TeamReferenceModel):
         code: Optional[str] = Field(
             None, description="Invitation code (auto-generated if not provided)"
         )
-        inviter_id: Optional[str] = Field(None, description="User ID of the inviter")
+        user_id: Optional[str] = Field(None, description="User ID of the inviter")
         max_uses: Optional[int] = Field(
             None, description="Maximum number of uses allowed"
         )
@@ -1993,7 +2014,7 @@ class InvitationModel(BaseMixinModel, UpdateMixinModel, TeamReferenceModel):
         RoleModel.ReferenceID.Search,
     ):
         code: Optional[StringSearchModel] = None
-        inviter_id: Optional[StringSearchModel] = None
+        user_id: Optional[StringSearchModel] = None
         max_uses: Optional[NumericalSearchModel] = None
         expires_at: Optional[DateSearchModel] = None
 
@@ -2066,8 +2087,8 @@ class InvitationManager(AbstractBLLManager):
         ):
             raise HTTPException(status_code=404, detail="Role not found")
 
-        if entity.inviter_id and not User.exists(
-            requester_id=self.requester.id, db=self.db, id=entity.inviter_id
+        if entity.user_id and not User.exists(
+            requester_id=self.requester.id, db=self.db, id=entity.user_id
         ):
             raise HTTPException(status_code=404, detail="Inviter not found")
 
@@ -2078,8 +2099,8 @@ class InvitationManager(AbstractBLLManager):
                 secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8)
             )
 
-        if "inviter_id" not in kwargs or not kwargs["inviter_id"]:
-            kwargs["inviter_id"] = self.requester.id
+        if "user_id" not in kwargs or not kwargs["user_id"]:
+            kwargs["user_id"] = self.requester.id
 
         return super().create(**kwargs)
 
@@ -2108,13 +2129,16 @@ class InvitationManager(AbstractBLLManager):
             "invitation_id": invitation.id,
             "invitation_code": invitation.code,
             "invitation_link": self.generate_invitation_link(invitation.code),
-            "invitee_id": invitee.id,
+            "user_id": invitee.id,
             "email": email,
         }
 
 
 class InvitationInviteeModel(
-    BaseMixinModel, UpdateMixinModel, InvitationReferenceModel
+    BaseMixinModel.Optional,
+    UpdateMixinModel.Optional,
+    UserReferenceModel.Optional,
+    InvitationReferenceModel,
 ):
     email: str = Field(..., description="Email of the invitee")
     is_accepted: bool = Field(
@@ -2123,20 +2147,17 @@ class InvitationInviteeModel(
     accepted_at: Optional[datetime] = Field(
         None, description="When the invitation was accepted"
     )
-    invitee_user_id: Optional[str] = Field(
-        None, description="User ID of the invitee after acceptance"
-    )
 
     class ReferenceID:
-        invitation_invitee_id: str = Field(
+        invitation_user_id: str = Field(
             ..., description="The ID of the related invitation invitee"
         )
 
         class Optional:
-            invitation_invitee_id: Optional[str] = None
+            invitation_user_id: Optional[str] = None
 
         class Search:
-            invitation_invitee_id: Optional[StringSearchModel] = None
+            invitation_user_id: Optional[StringSearchModel] = None
 
     class Create(
         BaseModel, InvitationModel.ReferenceID, UserModel.ReferenceID.Optional
@@ -2206,8 +2227,8 @@ class InvitationInviteeManager(AbstractBLLManager):
         if "@" not in entity.email:
             raise HTTPException(status_code=400, detail="Invalid email format")
 
-        if entity.invitee_user_id and not User.exists(
-            requester_id=self.requester.id, db=self.db, id=entity.invitee_user_id
+        if entity.user_id and not User.exists(
+            requester_id=self.requester.id, db=self.db, id=entity.user_id
         ):
             raise HTTPException(status_code=404, detail="User not found")
 
@@ -2235,7 +2256,7 @@ class InvitationInviteeManager(AbstractBLLManager):
         invitation = invitation[0]
 
         # Check if invitation has expired
-        if invitation.expires_at and invitation.expires_at < datetime.utcnow():
+        if invitation.expires_at and invitation.expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=410, detail="Invitation has expired")
 
         # Check if invitation has reached max uses
@@ -2277,8 +2298,8 @@ class InvitationInviteeManager(AbstractBLLManager):
                     invitation_id=invitation.id,
                     email=user.email,
                     is_accepted=True,
-                    accepted_at=datetime.utcnow(),
-                    invitee_user_id=user_id,
+                    accepted_at=datetime.now(timezone.utc),
+                    user_id=user_id,
                 )
         else:
             # Use existing invitee record
@@ -2286,8 +2307,8 @@ class InvitationInviteeManager(AbstractBLLManager):
             self.update(
                 id=invitee.id,
                 is_accepted=True,
-                accepted_at=datetime.utcnow(),
-                invitee_user_id=user_id,
+                accepted_at=datetime.now(timezone.utc),
+                user_id=user_id,
             )
 
         # Add user to team or update existing membership
@@ -2326,7 +2347,9 @@ class InvitationInviteeManager(AbstractBLLManager):
         }
 
 
-class UserSessionModel(BaseMixinModel, UpdateMixinModel, UserReferenceModel):
+class UserSessionModel(
+    BaseMixinModel.Optional, UpdateMixinModel.Optional, UserReferenceModel.Optional
+):
     session_key: str = Field(..., description="Unique session identifier")
     jwt_issued_at: datetime = Field(..., description="When the JWT was issued")
     refresh_token_hash: Optional[str] = Field(None, description="Hashed refresh token")
@@ -2512,7 +2535,7 @@ class UserSessionManager(AbstractBLLManager):
             requester_id=self.requester.id,
             db=self.db,
             id=session.id,
-            new_properties={"last_activity": datetime.utcnow()},
+            new_properties={"last_activity": datetime.now(timezone.utc)},
         )
 
         return {"message": "Session activity updated successfully"}

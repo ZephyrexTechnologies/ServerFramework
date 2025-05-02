@@ -26,7 +26,7 @@
             "meta": {
                 "singular": "Ability",
                 "plural": "Abilities",
-                "comment": "An Ability represents something an Agent can *do* with an Extension."
+                "comment": "An Ability represents something an Extension can do."
             },
             "properties": {
                 "id": {
@@ -50,7 +50,7 @@
             "meta": {
                 "singular": "Provider",
                 "plural": "Providers",
-                "comment": "A Provider represents an external provder of data or functionality. If extension_id is null, it represents an AI provider. If it is not, it represents an extension provider. Settings should exclude model name and api key, as those are stored in provider instance as fields."
+                "comment": "A Provider represents an external provder of data or functionality. If it is not, it represents an extension provider. Settings should exclude model name and api key, as those are stored in provider instance as fields."
             },
             "properties": {
                 "id": {
@@ -131,10 +131,6 @@
                     "column_name": "provider_id",
                     "comment": "Reference to the Provider"
                 },
-                "model_name": {
-                    "column_name": "model_name",
-                    "comment": "Model name for AI providers"
-                },
                 "api_key": {
                     "column_name": "api_key",
                     "comment": "API key for the provider"
@@ -146,7 +142,7 @@
             "meta": {
                 "singular": "Provider Instance Usage",
                 "plural": "Provider Instance Usages",
-                "comment": "A ProviderInstanceUsage represents a User's usage of a provider. If team_id is also populated, it was used on behalf of a team by a user (through a team agent). Lack of a record means a user has never used the ProviderInstance. Note that ProviderInstances lower on a rotation may be seldom/never used."
+                "comment": "A ProviderInstanceUsage represents a User's usage of a provider. If team_id is also populated, it was used on behalf of a team by a user. Lack of a record means a user has never used the ProviderInstance. Note that ProviderInstances lower on a rotation may be seldom/never used."
             },
             "properties": {
                 "id": {
@@ -593,8 +589,8 @@
                     "column_name": "role_id",
                     "comment": "Reference to the Role being granted"
                 },
-                "inviter_id": {
-                    "column_name": "inviter_id",
+                "user_id": {
+                    "column_name": "user_id",
                     "comment": "Reference to the User who created the invitation"
                 }
             },
@@ -627,8 +623,8 @@
                     "column_name": "invitation_id",
                     "comment": "Reference to the Invitation"
                 },
-                "invitee_user_id": {
-                    "column_name": "invitee_user_id",
+                "user_id": {
+                    "column_name": "user_id",
                     "comment": "Reference to the User who accepted the invitation"
                 }
             },
