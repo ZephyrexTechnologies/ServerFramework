@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager, contextmanager
 from threading import local
 from typing import AsyncGenerator, Generator, Optional
 
-from database.Base import DATABASE_TYPE, DATABASE_URI
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (
@@ -19,6 +18,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import Session, sessionmaker
+
+from database.Base import DATABASE_TYPE, DATABASE_URI
 
 
 class DatabaseManager:

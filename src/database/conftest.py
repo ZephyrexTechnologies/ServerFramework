@@ -1,10 +1,10 @@
 import pytest
+from helptest import generate_test_email
 from sqlalchemy.orm import Session
 
 from database.Base import get_session
 from database.DB_Auth import User
 from database.DB_Providers import Provider
-from helptest import generate_test_email
 
 # Import database components after environment setup
 

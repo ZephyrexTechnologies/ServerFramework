@@ -16,9 +16,9 @@ from fastapi import (
 from fastapi.security import APIKeyHeader, HTTPBasic
 from pydantic import BaseModel, Field, ValidationError, create_model
 
-from src.endpoints.StaticExampleFactory import ExampleGenerator
 from lib.Strings import pluralize
 from logic.BLL_Auth import UserManager
+from src.endpoints.StaticExampleFactory import ExampleGenerator
 
 # Set up logging
 logger = logging.getLogger(__name__)

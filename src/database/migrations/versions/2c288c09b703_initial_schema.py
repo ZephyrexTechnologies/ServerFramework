@@ -1,8 +1,8 @@
-"""initial migration
+"""initial schema
 
-Revision ID: 741a6b0f5b2c
+Revision ID: 2c288c09b703
 Revises: 
-Create Date: 2025-04-14 08:27:54.026849
+Create Date: 2025-05-02 10:26:50.936207
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '741a6b0f5b2c'
+revision: str = '2c288c09b703'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -36,6 +36,7 @@ def upgrade() -> None:
     )
     op.create_table('providers',
     sa.Column('name', sa.Text(), nullable=False),
+    sa.Column('friendly_name', sa.Text(), nullable=True),
     sa.Column('agent_settings_json', sa.Text(), nullable=True),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
@@ -45,14 +46,12 @@ def upgrade() -> None:
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
-    comment='A Provider represents an external provder of data or functionality. If extension_id is null, it represents an AI provider. If it is not, it represents an extension provider. Settings should exclude model name and api key, as those are stored in provider instance as fields.'
+    comment='A Provider represents an external provder of data or functionality. It represents an extension provider. Settings should exclude model name and api key, as those are stored in provider instance as fields.'
     )
     op.create_table('teams',
-    sa.Column('name', sa.String(), nullable=True, comment='Team name displayed in the UI'),
-    sa.Column('description', sa.String(), nullable=True, comment='Optional description of the team and its purpose'),
-    sa.Column('encryption_key', sa.String(), nullable=False, comment='Encryption key used for securing team-specific data'),
-    sa.Column('token', sa.String(), nullable=True, comment='Public token for external integrations'),
-    sa.Column('training_data', sa.String(), nullable=True, comment='Custom training data for team-specific AI models'),
+    sa.Column('name', sa.String(), nullable=False, comment='Human-readable team name'),
+    sa.Column('description', sa.String(), nullable=True, comment="Description of the team's purpose"),
+    sa.Column('encryption_key', sa.String(), nullable=False, comment='Encryption key for team resources'),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('created_by_user_id', sa.String(), nullable=True),
@@ -64,7 +63,7 @@ def upgrade() -> None:
     sa.Column('image_url', sa.String(), nullable=True),
     sa.ForeignKeyConstraint(['parent_id'], ['teams.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    comment='Organizations or groups of users that collaborate together with shared permissions'
+    comment='Teams to which users can belong'
     )
     with op.batch_alter_table('teams', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_teams_parent_id'), ['parent_id'], unique=False)
@@ -102,7 +101,7 @@ def upgrade() -> None:
     sa.Column('extension_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['extension_id'], ['extensions.id'], name='fk_ability_extensions_id'),
     sa.PrimaryKeyConstraint('id'),
-    comment='An Ability represents something an Agent can *do* with an Extension.'
+    comment='An Ability represents something an extension can do.'
     )
     op.create_table('auth_sessions',
     sa.Column('session_key', sa.String(), nullable=False, comment='Unique session identifier used in JWT jti claim'),
@@ -159,6 +158,7 @@ def upgrade() -> None:
     sa.Column('name', sa.Text(), nullable=False),
     sa.Column('model_name', sa.Text(), nullable=True),
     sa.Column('api_key', sa.Text(), nullable=True),
+    sa.Column('enabled', sa.Boolean(), nullable=False),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('created_by_user_id', sa.String(), nullable=True),
@@ -278,7 +278,6 @@ def upgrade() -> None:
     )
     op.create_table('invitations',
     sa.Column('code', sa.String(), nullable=True, comment='Invitation code for public sharing; null for direct invitations'),
-    sa.Column('inviter_id', sa.String(), nullable=True, comment='User who created this invitation'),
     sa.Column('max_uses', sa.Integer(), nullable=True, comment='Maximum number of times this invitation can be used; null for unlimited'),
     sa.Column('expires_at', sa.DateTime(), nullable=True, comment='When this invitation expires; null for no expiry'),
     sa.Column('id', sa.String(), nullable=False),
@@ -288,11 +287,12 @@ def upgrade() -> None:
     sa.Column('updated_by_user_id', sa.String(), nullable=True),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
+    sa.Column('user_id', sa.String(), nullable=False),
     sa.Column('team_id', sa.String(), nullable=False),
     sa.Column('role_id', sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(['inviter_id'], ['users.id'], name='fk_invitation_users_id'),
     sa.ForeignKeyConstraint(['role_id'], ['roles.id'], name='fk_invitation_roles_id'),
     sa.ForeignKeyConstraint(['team_id'], ['teams.id'], name='fk_invitation_teams_id'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_invitation_users_id'),
     sa.PrimaryKeyConstraint('id'),
     comment='Invitations to join teams, can be direct or via invitation code'
     )
@@ -338,7 +338,6 @@ def upgrade() -> None:
     comment='A ProviderExtensionAbility represents a ProviderExtension and Ability combination. This allows for a provider to provide partial functionality to an extension, for example SendGrid only provides sending email, but not an inbox.'
     )
     op.create_table('provider_instance_settings',
-    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.Column('key', sa.Text(), nullable=False),
     sa.Column('value', sa.Text(), nullable=True),
     sa.Column('id', sa.String(), nullable=False),
@@ -348,12 +347,12 @@ def upgrade() -> None:
     sa.Column('updated_by_user_id', sa.String(), nullable=True),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
+    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['provider_instance_id'], ['provider_instances.id'], name='fk_providerinstancesetting_provider_instances_id'),
     sa.PrimaryKeyConstraint('id'),
     comment="A ProviderInstanceSetting represents a non-default configuration setting for a User or Team's instance of an Provider."
     )
     op.create_table('provider_instance_usage',
-    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.Column('input_tokens', sa.Integer(), nullable=True),
     sa.Column('output_tokens', sa.Integer(), nullable=True),
     sa.Column('id', sa.String(), nullable=False),
@@ -365,11 +364,12 @@ def upgrade() -> None:
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
     sa.Column('user_id', sa.String(), nullable=True),
     sa.Column('team_id', sa.String(), nullable=True),
+    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['provider_instance_id'], ['provider_instances.id'], name='fk_providerinstanceusage_provider_instances_id'),
     sa.ForeignKeyConstraint(['team_id'], ['teams.id'], name='fk_providerinstanceusage_teams_id'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_providerinstanceusage_users_id'),
     sa.PrimaryKeyConstraint('id'),
-    comment="A ProviderInstanceUsage represents a User's usage of a provider. If team_id is also populated, it was used on behalf of a team by a user (through a team agent). Lack of a record means a user has never used the ProviderInstance. Note that ProviderInstances lower on a rotation may be seldom/never used."
+    comment="A ProviderInstanceUsage represents a User's usage of a provider. If team_id is also populated, it was used on behalf of a team by a user. Lack of a record means a user has never used the ProviderInstance. Note that ProviderInstances lower on a rotation may be seldom/never used."
     )
     op.create_table('rate_limit_policies',
     sa.Column('name', sa.String(), nullable=False),
@@ -394,7 +394,6 @@ def upgrade() -> None:
     )
     op.create_table('rotation_provider_instances',
     sa.Column('rotation_id', sa.String(), nullable=False),
-    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('created_by_user_id', sa.String(), nullable=True),
@@ -403,6 +402,7 @@ def upgrade() -> None:
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
     sa.Column('parent_id', sa.String(), nullable=True),
+    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['parent_id'], ['rotation_provider_instances.id'], ),
     sa.ForeignKeyConstraint(['provider_instance_id'], ['provider_instances.id'], name='fk_rotationproviderinstance_provider_instances_id'),
     sa.ForeignKeyConstraint(['rotation_id'], ['rotations.id'], name='fk_rotationproviderinstance_rotations_id'),
@@ -413,7 +413,8 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_rotation_provider_instances_parent_id'), ['parent_id'], unique=False)
 
     op.create_table('user_teams',
-    sa.Column('enabled', sa.Boolean(), nullable=True, comment='Whether this user-team relationship is active'),
+    sa.Column('enabled', sa.Boolean(), nullable=True, comment='Whether this user-team link is currently active'),
+    sa.Column('expires_at', sa.DateTime(), nullable=True, comment='When this user-team link expires; null for no expiry'),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('created_by_user_id', sa.String(), nullable=True),
@@ -435,7 +436,6 @@ def upgrade() -> None:
     sa.Column('is_accepted', sa.Boolean(), nullable=True, comment='Whether the invitation has been accepted'),
     sa.Column('accepted_at', sa.DateTime(), nullable=True, comment='When the invitation was accepted'),
     sa.Column('invitation_id', sa.String(), nullable=False, comment='Reference to the invitation sent to this invitee'),
-    sa.Column('invitee_user_id', sa.String(), nullable=False, comment='User who accepted the invitation, if accepted'),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('created_by_user_id', sa.String(), nullable=True),
@@ -443,13 +443,13 @@ def upgrade() -> None:
     sa.Column('updated_by_user_id', sa.String(), nullable=True),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
+    sa.Column('user_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['invitation_id'], ['invitations.id'], name='fk_invitationinvitee_invitations_id'),
-    sa.ForeignKeyConstraint(['invitee_user_id'], ['users.id'], name='fk_invitationinvitee_users_id'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name='fk_invitationinvitee_users_id'),
     sa.PrimaryKeyConstraint('id'),
     comment='Tracks specific individuals invited to join a team'
     )
     op.create_table('provider_instance_extension_abilities',
-    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.Column('provider_extension_ability_id', sa.String(), nullable=False),
     sa.Column('state', sa.Boolean(), nullable=False),
     sa.Column('forced', sa.Boolean(), nullable=False),
@@ -460,6 +460,7 @@ def upgrade() -> None:
     sa.Column('updated_by_user_id', sa.String(), nullable=True),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('deleted_by_user_id', sa.String(), nullable=True),
+    sa.Column('provider_instance_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['provider_extension_ability_id'], ['provider_extension_abilities.id'], name='fk_providerinstanceextensionability_provider_extension_abilities_id'),
     sa.ForeignKeyConstraint(['provider_instance_id'], ['provider_instances.id'], name='fk_providerinstanceextensionability_provider_instances_id'),
     sa.PrimaryKeyConstraint('id'),

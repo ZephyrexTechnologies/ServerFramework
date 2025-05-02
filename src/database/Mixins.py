@@ -863,7 +863,7 @@ class BaseMixin:
         if hasattr(cls, "deleted_at"):
             if filters:
                 filters.append(cls.deleted_at == None)
-            else: 
+            else:
                 filters = [cls.deleted_at == None]
 
         # Build base query
