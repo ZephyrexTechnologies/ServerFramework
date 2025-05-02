@@ -109,7 +109,7 @@ Entities can inherit permissions from other entities through references:
 permission_references = ["provider_instance", "extension"]
 ```
 
-Permission references allow inheritance through SQL EXISTS clauses for efficient filtering.
+Permission references allow checks during creation (`check_access_to_all_referenced_entities`) to ensure the user has access to all related entities. While the concept allows for permission inheritance, the current SQL-level filtering (`generate_permission_filter`) primarily focuses on direct ownership, team membership, and explicit permissions rather than recursively filtering based on arbitrary `permission_references` chains.
 
 ### Create Permission Reference
 The `create_permission_reference` attribute specifies which referenced entity determines create permissions:
@@ -169,7 +169,7 @@ These should rarely be overridden except for special cases like the `User` model
 
 ### Permission Filter Usage
 
-For list operations, use the permission filter:
+For list operations, use the permission filter. It primarily checks direct ownership, team membership, and explicit permissions.
 
 ```python
 perm_filter = generate_permission_filter(user_id, cls, db, PermissionType.VIEW)

@@ -134,14 +134,19 @@ Benefits:
 Field validation is centralized:
 
 ```python
+# In StaticPermissions.py - used for general query validation
 def validate_columns(cls, updated=None, **kwargs):
     """Validate that the provided column names exist in the model."""
+
+# In AbstractDatabaseEntity.py - used for DTO conversion field validation
+def validate_fields(cls, fields):
+    """Validate that the fields exist on the model class."""
 ```
 
 This ensures:
-1. **Early Validation**: Invalid columns are caught before database operations
+1. **Early Validation**: Invalid columns/fields are caught before database operations or DTO conversion
 2. **Consistent Error Messages**: Standard format for validation errors
-3. **Security**: Prevents injection attacks via column names
+3. **Security**: Prevents potential issues via invalid column/field names
 
 ## System Initialization
 

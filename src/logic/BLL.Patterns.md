@@ -4,7 +4,7 @@
 
 > **Note:** For comprehensive documentation on the core abstractions used in the Business Logic Layer, including AbstractBLLManager, please refer to [BLL.Abstraction.md](BLL.Abstraction.md#business-logic-layer-manager-abstractbllmanager).
 
-The Business Logic Layer in this application follows a standardized pattern to ensure consistency across different domain entities. Comments should not be present unless required for some in a senior engineer position to understand what's happening. There should never be direct database connection queries in the BLL files, all queries must do through the abstract functions in Mixins.py. 
+The Business Logic Layer in this application follows a standardized pattern to ensure consistency across different domain entities. Comments should not be present unless required for some in a senior engineer position to understand what's happening. There should never be direct database connection queries in the BLL files, all queries must do through the abstract functions in AbstractDatabaseEntity.py. 
 
 ## AbstractBLLManager-based Managers
 
@@ -205,7 +205,7 @@ Managers inherit standard CRUD operations from AbstractBLLManager:
 - `batch_update(items)`: Update multiple entities in a single transaction
 - `batch_delete(ids)`: Delete multiple entities in a single transaction
 
-These functions validate `kwargs` against the appropriate child of `EntityModel`, and then pass them into the database functions from `Mixins.py`.
+These functions validate `kwargs` against the appropriate child of `EntityModel`, and then pass them into the database functions from `AbstractDatabaseEntity.py`.
 
 Additional data from other tables should not be included automatically nor should methods referencing other tables be included - there is already join functionality in the AbstractBLLManager get/list functions. For example, PromptManager should not have functions working with PromptArguments.
 

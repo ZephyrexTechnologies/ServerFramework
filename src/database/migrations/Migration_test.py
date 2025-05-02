@@ -314,8 +314,8 @@ except Exception as e:
             )
         log.info(f"Created base Base.py at {base_py}")
 
-        # Create minimal src/database/Mixins.py
-        mixins_py = self.database_dir / "Mixins.py"
+        # Create minimal src/database/AbstractDatabaseEntity.py
+        mixins_py = self.database_dir / "AbstractDatabaseEntity.py"
         with open(mixins_py, "w") as f:
             f.write(
                 """# Minimal Mixins for testing
@@ -323,7 +323,7 @@ class BaseMixin:
     pass
 """
             )
-        log.info(f"Created base Mixins.py at {mixins_py}")
+        log.info(f"Created base AbstractDatabaseEntity.py at {mixins_py}")
 
     def run_migration_command(self, *args, expect_success=True):
         """Run a migration command and return the result"""

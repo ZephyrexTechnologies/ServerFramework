@@ -814,7 +814,7 @@ class UserManager(AbstractBLLManager):
         """Get a user with optional included relationships."""
         options = []
 
-        # TODO Move generate_joins to Mixins.py
+        # TODO Move generate_joins to AbstractDatabaseEntity.py
         if include:
             options = self.generate_joins(self.DBClass, include)
 
