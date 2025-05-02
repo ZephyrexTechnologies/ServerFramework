@@ -191,6 +191,8 @@ Use mixin classes from AbstractBLLManager for common properties:
 
 Additionally, use `OtherEntityModel.ReferenceID`, `OtherEntityModel.ReferenceID.Optional` or `OtherEntityModel.ReferenceID.Search` as a mixin for a model to automatically add the foreign key fields. You can also use `OtherEntityReferenceModel` or `OtherEntityReferenceModel.Optional` to automatically add BOTH the foriegn key field and object reference field. Foreign key fields should all be populated this way and should not be declared manually. The specific `OtherEntityModel.ReferenceID` and `OtherEntityModel.ReferenceID.Optional` can be used for the `Create`, `Update`, etc models.
 
+It's important to distinguish this from the `ReferenceID` class defined *within* the main entity model (e.g., `ProviderModel.ReferenceID`). The inner `ReferenceID` class defines how *other* models should reference *this* entity, while the mixins (`UserModel.ReferenceID`, `TeamModel.ReferenceID.Optional`, etc.) are used when *this* entity needs to hold a foreign key *to another* entity.
+
 Optional variants are provided to be used for both updates (PUT supports partial entities), and nullable database fields in creates.
 
 ### CRUD Operations

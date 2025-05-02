@@ -610,6 +610,17 @@ class ProviderInstanceExtensionAbilityModel(BaseMixinModel, UpdateMixinModel):
     state: bool = True
     forced: bool = False
 
+    class ReferenceID:
+        provider_instance_extension_ability_id: str = Field(
+            ..., description="The ID of the related provider instance extension ability"
+        )
+
+        class Optional:
+            provider_instance_extension_ability_id: Optional[str] = None
+
+        class Search:
+            provider_instance_extension_ability_id: Optional[StringSearchModel] = None
+
     class Create(BaseModel):
         provider_instance_id: str
         provider_extension_ability_id: str
@@ -792,6 +803,17 @@ class RotationProviderInstanceModel(
     rotation_id: str
     provider_instance_id: str
     permission_references: List[str] = ["rotation"]
+
+    class ReferenceID:
+        rotation_provider_instance_id: str = Field(
+            ..., description="The ID of the related rotation provider instance"
+        )
+
+        class Optional:
+            rotation_provider_instance_id: Optional[str] = None
+
+        class Search:
+            rotation_provider_instance_id: Optional[StringSearchModel] = None
 
     class Create(BaseModel):
         rotation_id: str
