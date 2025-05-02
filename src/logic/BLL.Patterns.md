@@ -255,13 +255,12 @@ def batch_delete(self, ids: List[str]):
 
 ### Validation (Optional)
 
-Use `createValidation` hook to add custom validation before entity creation. It should **not** be used to repeat validation of NOT NULLs, etc that are already enforced by the database, nor validation that is performed by model validators. It should be used only for complex multi-entity logic:
+Use Pydantic model validators (`@field_validator`, `@model_validator`) within the relevant `.Create` or `.Update` models for validation logic that operates *only* on the data within the model itself (e.g., format checks, length checks, cross-field consistency).
 
-```python
-# Optional complex validator, if validation logic is required.
-def createValidation(self, entity):
-    pass
-```
+Use the `createValidation` hook in the BLL Manager *only* when validation logic requires access to the database session, which is not available during Pydantic validation. This is typically needed for checks like:
+- Complex multi-entity validation rules requiring database queries.
+
+Do **not** use `createValidation` to repeat simple validation (like NOT NULL checks and foreign key checks) already enforced by the database or achievable through Pydantic model validators.
 
 ## Common Patterns Across All Files
 

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import traceback
+import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, TypeVar
 
@@ -34,6 +35,7 @@ class AbstractService(ABC):
         interval_seconds: int = 60,
         max_failures: int = 3,
         retry_delay_seconds: int = 5,
+        service_id: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -45,6 +47,7 @@ class AbstractService(ABC):
             interval_seconds: Time between service update executions in seconds
             max_failures: Maximum number of consecutive failures before service stops
             retry_delay_seconds: Time to wait after a failure before retrying
+            service_id: Optional unique identifier for the service instance. Auto-generated if None.
             **kwargs: Additional service-specific parameters
         """
         self.requester_id = requester_id
@@ -57,6 +60,7 @@ class AbstractService(ABC):
         self.running = False
         self.paused = False
         self._last_run_time = 0
+        self.service_id = service_id or str(uuid.uuid4())
         self._configure_service(**kwargs)
 
     def _configure_service(self, **kwargs) -> None:
@@ -78,39 +82,47 @@ class AbstractService(ABC):
     def start(self) -> None:
         """Start the service running in the background."""
         if self.running:
-            logging.info(f"{self.__class__.__name__} is already running")
+            logging.info(
+                f"{self.__class__.__name__} ({self.service_id}) is already running"
+            )
             return
 
         self.running = True
         self.paused = False
-        logging.info(f"Started {self.__class__.__name__}")
+        logging.info(f"Started {self.__class__.__name__} ({self.service_id})")
 
     def stop(self) -> None:
         """Stop the service from running."""
         self.running = False
-        logging.info(f"Stopped {self.__class__.__name__}")
+        logging.info(f"Stopped {self.__class__.__name__} ({self.service_id})")
 
     def pause(self) -> None:
         """Pause the service temporarily."""
         if not self.running:
-            logging.warning(f"{self.__class__.__name__} is not running, cannot pause")
+            logging.warning(
+                f"{self.__class__.__name__} ({self.service_id}) is not running, cannot pause"
+            )
             return
 
         self.paused = True
-        logging.info(f"Paused {self.__class__.__name__}")
+        logging.info(f"Paused {self.__class__.__name__} ({self.service_id})")
 
     def resume(self) -> None:
         """Resume a paused service."""
         if not self.running:
-            logging.warning(f"{self.__class__.__name__} is not running, cannot resume")
+            logging.warning(
+                f"{self.__class__.__name__} ({self.service_id}) is not running, cannot resume"
+            )
             return
 
         if not self.paused:
-            logging.warning(f"{self.__class__.__name__} is not paused, cannot resume")
+            logging.warning(
+                f"{self.__class__.__name__} ({self.service_id}) is not paused, cannot resume"
+            )
             return
 
         self.paused = False
-        logging.info(f"Resumed {self.__class__.__name__}")
+        logging.info(f"Resumed {self.__class__.__name__} ({self.service_id})")
 
     def _handle_failure(self, error: Exception) -> bool:
         """
@@ -126,13 +138,15 @@ class AbstractService(ABC):
             Exception: If max failures reached
         """
         self.failures += 1
-        logging.error(f"{self.__class__.__name__} error: {str(error)}")
+        logging.error(
+            f"{self.__class__.__name__} ({self.service_id}) error: {str(error)}"
+        )
         logging.debug(traceback.format_exc())
 
         if self.failures > self.max_failures:
             self.running = False
             raise Exception(
-                f"{self.__class__.__name__} Error: Too many failures. {error}"
+                f"{self.__class__.__name__} ({self.service_id}) Error: Too many failures. {error}"
             )
 
         return True
@@ -191,6 +205,7 @@ class AbstractService(ABC):
         Perform any necessary cleanup when the service is being shut down.
         Override this method in subclasses to add specific cleanup operations.
         """
+        logging.info(f"Cleaning up {self.__class__.__name__} ({self.service_id})")
         self.stop()
 
     def __del__(self):
@@ -220,8 +235,12 @@ class ServiceRegistry:
             service_id: Unique identifier for the service
             service: Service instance to register
         """
+        if service_id in cls._services:
+            logging.warning(
+                f"Service with ID {service_id} already registered. Overwriting."
+            )
         cls._services[service_id] = service
-        logging.info(f"Service {service_id} registered")
+        logging.info(f"Service {service_id} registered ({service.__class__.__name__})")
 
     @classmethod
     def unregister(cls, service_id: str) -> None:
@@ -234,7 +253,9 @@ class ServiceRegistry:
         if service_id in cls._services:
             service = cls._services.pop(service_id)
             service.cleanup()
-            logging.info(f"Service {service_id} unregistered")
+            logging.info(
+                f"Service {service_id} unregistered ({service.__class__.__name__})"
+            )
 
     @classmethod
     def get(cls, service_id: str) -> Optional[AbstractService]:
@@ -263,19 +284,33 @@ class ServiceRegistry:
     def start_all(cls) -> None:
         """Start all registered services."""
         for service_id, service in cls._services.items():
-            service.start()
-            logging.info(f"Service {service_id} started")
+            try:
+                service.start()
+                # Logging now happens within service.start()
+            except Exception as e:
+                logging.error(
+                    f"Failed to start service {service_id} ({service.__class__.__name__}): {e}"
+                )
 
     @classmethod
     def stop_all(cls) -> None:
         """Stop all registered services."""
         for service_id, service in cls._services.items():
-            service.stop()
-            logging.info(f"Service {service_id} stopped")
+            try:
+                service.stop()
+                # Logging now happens within service.stop()
+            except Exception as e:
+                logging.error(
+                    f"Failed to stop service {service_id} ({service.__class__.__name__}): {e}"
+                )
 
     @classmethod
     def cleanup_all(cls) -> None:
         """Clean up all registered services."""
         for service_id in list(cls._services.keys()):
-            cls.unregister(service_id)
+            try:
+                cls.unregister(service_id)
+                # Logging happens within unregister/cleanup
+            except Exception as e:
+                logging.error(f"Failed to cleanup/unregister service {service_id}: {e}")
         logging.info("All services cleaned up")

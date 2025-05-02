@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from database.DB_Providers import (
@@ -44,6 +44,12 @@ class ProviderModel(BaseMixinModel, UpdateMixinModel, NameMixinModel):
         name: str
         agent_settings_json: Optional[str] = None
         system: bool = False
+
+        @model_validator(mode="after")
+        def validate_name_length(self):
+            if self.name and len(self.name) < 2:
+                raise ValueError("Provider name must be at least 2 characters long")
+            return self
 
     class Update(BaseModel):
         name: Optional[str] = None
@@ -98,52 +104,45 @@ class ProviderManager(AbstractBLLManager):
             target_team_id=target_team_id,
             db=db,
         )
-        self._extension = None
-        self._instance = None
-        self._rotation = None
+        self._extensions = None
+        self._instances = None
+        self._rotations = None
 
     @property
-    def extension(self):
-        if self._extension is None:
+    def extensions(self):
+        if self._extensions is None:
             # Import locally to avoid circular imports
-            self._extension = ProviderExtensionManager(
+            self._extensions = ProviderExtensionManager(
                 requester_id=self.requester.id,
                 target_user_id=self.target_user_id,
                 target_team_id=self.target_team_id,
                 db=self.db,
             )
-        return self._extension
+        return self._extensions
 
     @property
-    def instance(self):
-        if self._instance is None:
+    def instances(self):
+        if self._instances is None:
             # Import locally to avoid circular imports
-            self._instance = ProviderInstanceManager(
+            self._instances = ProviderInstanceManager(
                 requester_id=self.requester.id,
                 target_user_id=self.target_user_id,
                 target_team_id=self.target_team_id,
                 db=self.db,
             )
-        return self._instance
+        return self._instances
 
     @property
-    def rotation(self):
-        if self._rotation is None:
+    def rotations(self):
+        if self._rotations is None:
             # Import locally to avoid circular imports
-            self._rotation = RotationManager(
+            self._rotations = RotationManager(
                 requester_id=self.requester.id,
                 target_user_id=self.target_user_id,
                 target_team_id=self.target_team_id,
                 db=self.db,
             )
-        return self._rotation
-
-    def createValidation(self, entity):
-        if hasattr(entity, "name") and entity.name and len(entity.name) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="Provider name must be at least 2 characters long",
-            )
+        return self._rotations
 
     @staticmethod
     def list_runtime_providers():
@@ -325,6 +324,14 @@ class ProviderInstanceModel(
         user_id: Optional[str] = None
         team_id: Optional[str] = None
 
+        @model_validator(mode="after")
+        def validate_name_length(self):
+            if self.name and len(self.name) < 2:
+                raise ValueError(
+                    "Provider instance name must be at least 2 characters long"
+                )
+            return self
+
     class Update(BaseModel):
         name: Optional[str] = None
         provider_id: Optional[str] = None
@@ -438,13 +445,6 @@ class ProviderInstanceManager(AbstractBLLManager):
                 db=self.db,
             )
         return self._ability
-
-    def createValidation(self, entity):
-        if hasattr(entity, "name") and entity.name and len(entity.name) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="Provider instance name must be at least 2 characters long",
-            )
 
 
 class ProviderInstanceUsageModel(
@@ -705,6 +705,12 @@ class RotationModel(
         user_id: Optional[str] = None
         team_id: Optional[str] = None
 
+        @model_validator(mode="after")
+        def validate_name_length(self):
+            if self.name and len(self.name) < 2:
+                raise ValueError("Rotation name must be at least 2 characters long")
+            return self
+
     class Update(BaseModel):
         name: Optional[str] = None
         description: Optional[str] = None
@@ -786,13 +792,6 @@ class RotationManager(AbstractBLLManager):
                 db=self.db,
             )
         return self._provider_instances
-
-    def createValidation(self, entity):
-        if hasattr(entity, "name") and entity.name and len(entity.name) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="Rotation name must be at least 2 characters long",
-            )
 
 
 class RotationProviderInstanceModel(
