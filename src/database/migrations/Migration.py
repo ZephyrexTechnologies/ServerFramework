@@ -4,8 +4,7 @@ Unified database migration management tool for core and extension migrations.
 Handles initialization, creation, applying, and management of migrations.
 """
 
-# TODO alembic.ini and env.py not cleaned up in extensions after migrating on server start.
-# TODO extensions that extend existing tables appear to try to completely recreate the table (ai_agents provider_instances)
+# TODO Run black formatter on every migration after creation.
 
 import argparse
 import json
