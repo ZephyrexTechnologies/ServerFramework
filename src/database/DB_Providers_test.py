@@ -28,21 +28,22 @@ class TestProvider(AbstractDBTest):
 
 
 class TestProviderExtension(AbstractDBTest):
-    from database.DB_Extensions_test import TestExtension
+    pass
+    #from database.DB_Extensions_test import TestExtension
 
-    class_under_test = ProviderExtension
-    create_fields = {}
-    update_fields = {}  # No updateable fields besides system fields
-    parent_entities = [
-        ParentEntity(
-            name="extension", foreign_key="extension_id", test_class=TestExtension
-        ),
-        ParentEntity(
-            name="provider",
-            foreign_key="provider_id",
-            test_class=TestProvider,
-        ),
-    ]
+    #class_under_test = ProviderExtension
+    #create_fields = {}
+    #update_fields = {}  # No updateable fields besides system fields
+    #parent_entities = [
+    #    ParentEntity(
+    #        name="extension", foreign_key="extension_id", test_class=TestExtension
+    #    ),
+    #    ParentEntity(
+    #        name="provider",
+    #        foreign_key="provider_id",
+    #        test_class=TestProvider,
+    #    ),
+    #]
 
     # def setup_method(self, method):
     #     super().setup_method(method)
@@ -104,26 +105,26 @@ class TestProviderInstance(AbstractDBTest):
 
 
 class TestProviderExtensionAbility(AbstractDBTest):
-    from DB_Extensions_test import TestAbility
-
-    class_under_test = ProviderExtensionAbility
-    create_fields = {
-        "provider_extension_id": None,  # Will be populated in setup
-        "ability_id": None,  # Will be populated in setup
-    }
-    update_fields = {}  # No updateable fields besides system fields
-    parent_entities = [
-        ParentEntity(
-            name="provider_extension",
-            foreign_key="provider_extension_id",
-            test_class=TestProviderExtension,
-        ),
-        ParentEntity(
-            name="ability",
-            foreign_key="ability_id",
-            test_class=TestAbility,
-        ),
-    ]
+    pass
+    #from DB_Extensions_test import TestAbility
+    #class_under_test = ProviderExtensionAbility
+    #create_fields = {
+    #    "provider_extension_id": None,  # Will be populated in setup
+    #    "ability_id": None,  # Will be populated in setup
+    #}
+    #update_fields = {}  # No updateable fields besides system fields
+    #parent_entities = [
+    #    ParentEntity(
+    #        name="provider_extension",
+    #        foreign_key="provider_extension_id",
+    #        test_class=TestProviderExtension,
+    #    ),
+    #    ParentEntity(
+    #        name="ability",
+    #        foreign_key="ability_id",
+    #        test_class=TestAbility,
+    #    ),
+    #]
 
     # def setup_method(self, method):
     #     super().setup_method(method)

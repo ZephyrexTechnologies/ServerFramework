@@ -239,13 +239,13 @@ def setup_database():
     import_extension_models()
 
     # Get the database manager instance
-    db_manager = DatabaseManager.get_instance()
+    setup_db_manager = DatabaseManager.get_instance()
 
     # Initialize engine configuration in parent process
-    db_manager.init_engine_config()
+    setup_db_manager.init_engine_config()
 
     # Get engine for initial setup
-    engine = db_manager.get_setup_engine()
+    engine = setup_db_manager.get_setup_engine()
 
     db_type = env("DATABASE_TYPE")
     db_name = env("DATABASE_NAME")
@@ -320,13 +320,13 @@ def create_app():
     async def lifespan(app: FastAPI):
         """Handles startup and shutdown events for each worker"""
         # Initialize services
-        db_manager.init_worker()  # Now the worker can initialize since config exists
-
+        db_mgr = DatabaseManager.get_instance()
+        db_mgr.init_worker()  # Now the worker can initialize since config exists
         try:
             yield
         finally:
             # Cleanup services
-            await db_manager.close_worker()
+            await db_mgr.close_worker()
 
     # Initialize FastAPI application
     app = FastAPI(

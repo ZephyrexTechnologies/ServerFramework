@@ -167,15 +167,6 @@ def mocker():
     return SimpleMocker()
 
 
-# Create a Faker fixture that can be used in tests
-@pytest.fixture
-def faker():
-    """
-    Fixture that provides a Faker instance for generating fake test data.
-    """
-    return Faker()
-
-
 # First, store original environment variables before loading .env
 original_env = {}
 for key in ["DATABASE_TYPE", "DATABASE_NAME"]:
