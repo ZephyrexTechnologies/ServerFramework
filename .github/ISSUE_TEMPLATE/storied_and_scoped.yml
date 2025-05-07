@@ -1,0 +1,85 @@
+name: Scoped and Storied Issue
+description: Template for implementing well documented issues.
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## User Story
+
+  - type: input
+    id: user-role
+    attributes:
+      label: "As a"
+      description: "The persona or role that benefits from this feature"
+      placeholder: "backend developer"
+    validations:
+      required: true
+
+  - type: input
+    id: user-want
+    attributes:
+      label: "I want"
+      description: "The specific feature or capability being requested"
+      placeholder: "concrete REST CRUD tests for all abstract endpoint modules"
+    validations:
+      required: true
+
+  - type: input
+    id: user-benefit
+    attributes:
+      label: "So that"
+      description: "The benefit or value that will result"
+      placeholder: "our CI can catch regressions and ensure the API conforms to its schema"
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "Acceptance Criteria"
+      description: "Criteria for acceptance of this issue"
+      placeholder: "[ ] Criterion 1\n[ ] Criterion 2\n[ ] Criterion 3"
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Scope Boundaries
+
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: "In-Scope"
+      description: "Items that are included in this task"
+      placeholder: "- Item 1\n- Item 2\n- Item 3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: "Out-of-Scope"
+      description: "Items that are explicitly excluded from this task"
+      placeholder: "- Item 1\n- Item 2\n- Item 3"
+    validations:
+      required: false
+
+  - type: input
+    id: issue-dependencies
+    attributes:
+      label: "Issue Dependencies"
+      description: "List issue numbers that this task depends on (comma-separated)"
+      placeholder: "#123, #124, #125"
+    validations:
+      required: false
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "Other Dependencies"
+      description: "Items that this issue depends on"
+      placeholder: "- Item 1\n- Item 2\n- Item 3"
+    validations:
+      required: false
