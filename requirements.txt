@@ -43,4 +43,5 @@ pluralizer
 python-dotenv
 resolvelib
 semver
-stringcase 
+stringcase
+black
