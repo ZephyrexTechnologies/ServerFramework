@@ -436,6 +436,20 @@ async def change_password(
     )
 
 
+@user_router.delete(
+    "",
+    summary="Delete current user",
+    description="Marks the current user as deleted (deactivates the account).",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_current_user(
+    manager=Depends(get_user_manager),
+):
+    """Deactivate (self-delete) the current user."""
+    manager.update(id=manager.requester.id, active=False)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # Create standalone Role router for /v1/role/{id} GET, PUT, DELETE
 role_router = AbstractEPRouter(
     prefix="/v1/role",
