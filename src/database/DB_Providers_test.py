@@ -29,12 +29,12 @@ class TestProvider(AbstractDBTest):
 
 class TestProviderExtension(AbstractDBTest):
     pass
-    #from database.DB_Extensions_test import TestExtension
+    # from database.DB_Extensions_test import TestExtension
 
-    #class_under_test = ProviderExtension
-    #create_fields = {}
-    #update_fields = {}  # No updateable fields besides system fields
-    #parent_entities = [
+    # class_under_test = ProviderExtension
+    # create_fields = {}
+    # update_fields = {}  # No updateable fields besides system fields
+    # parent_entities = [
     #    ParentEntity(
     #        name="extension", foreign_key="extension_id", test_class=TestExtension
     #    ),
@@ -43,7 +43,7 @@ class TestProviderExtension(AbstractDBTest):
     #        foreign_key="provider_id",
     #        test_class=TestProvider,
     #    ),
-    #]
+    # ]
 
     # def setup_method(self, method):
     #     super().setup_method(method)
@@ -106,14 +106,14 @@ class TestProviderInstance(AbstractDBTest):
 
 class TestProviderExtensionAbility(AbstractDBTest):
     pass
-    #from DB_Extensions_test import TestAbility
-    #class_under_test = ProviderExtensionAbility
-    #create_fields = {
+    # from DB_Extensions_test import TestAbility
+    # class_under_test = ProviderExtensionAbility
+    # create_fields = {
     #    "provider_extension_id": None,  # Will be populated in setup
     #    "ability_id": None,  # Will be populated in setup
-    #}
-    #update_fields = {}  # No updateable fields besides system fields
-    #parent_entities = [
+    # }
+    # update_fields = {}  # No updateable fields besides system fields
+    # parent_entities = [
     #    ParentEntity(
     #        name="provider_extension",
     #        foreign_key="provider_extension_id",
@@ -124,7 +124,7 @@ class TestProviderExtensionAbility(AbstractDBTest):
     #        foreign_key="ability_id",
     #        test_class=TestAbility,
     #    ),
-    #]
+    # ]
 
     # def setup_method(self, method):
     #     super().setup_method(method)
