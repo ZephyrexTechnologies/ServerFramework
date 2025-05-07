@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from database.Base import get_session
 from database.DB_Auth import User
 from database.DB_Providers import Provider
+
 # Import database components after environment setup
 
 
@@ -27,7 +28,9 @@ def cleanup_session(session: Session):
 @pytest.fixture
 def test_user(db_session, faker):
     """Create a test user"""
-    user = User(email=faker.email(), first_name=faker.first_name(), last_name=faker.last_name())
+    user = User(
+        email=faker.email(), first_name=faker.first_name(), last_name=faker.last_name()
+    )
     db_session.add(user)
     db_session.commit()
     yield user
