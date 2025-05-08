@@ -2,19 +2,48 @@ name: Stage Downstream Repositories
 
 on:
   workflow_call:
-    inputs:
-      is_from_dev:
-        required: true
-        type: boolean
     secrets:
       PAT_TOKEN:
         required: true
       DOWNSTREAM_REPOSITORIES:
         required: true
+  pull_request:
+    branches:
+      - dev
 
 jobs:
+  check-pr-source:
+    runs-on: ubuntu-latest
+    outputs:
+      is_from_dev: ${{ steps.check_branch.outputs.is_from_dev }}
+    steps:
+      - name: Check if workflow is operating from dev branch
+        id: check_branch
+        run: |
+          IS_FROM_DEV="false"
+
+          # For pull requests, check if the target branch is dev
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "dev" ]]; then
+            IS_FROM_DEV="true"
+            echo "This is a pull request targeting the dev branch"
+          # For directly triggered workflows, check the current branch
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            IS_FROM_DEV="true"
+            echo "This workflow is running directly on the dev branch"
+          else
+            echo "This workflow is not running from the dev branch"
+          fi
+
+          echo "is_from_dev=$IS_FROM_DEV" >> $GITHUB_OUTPUT
+          echo "is_from_dev: $IS_FROM_DEV"
+
+  run-tests:
+    needs: check-pr-source
+    uses: ./.github/workflows/test-pytest.yml
+
   stage-downstream:
-    if: inputs.is_from_dev
+    needs: [check-pr-source, run-tests]
+    if: needs.check-pr-source.outputs.is_from_dev == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

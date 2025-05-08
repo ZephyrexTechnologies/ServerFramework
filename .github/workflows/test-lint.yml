@@ -1,10 +1,10 @@
 name: Lint
 on:
   workflow_call:
-    outputs:
-      auto_formatted:
-        description: "Whether the workflow auto-formatted code"
-        value: ${{ jobs.lint.outputs.auto_formatted }}
+  push:
+    branches-ignore:
+      - main
+      - dev
 
 jobs:
   lint:

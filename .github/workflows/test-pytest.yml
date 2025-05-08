@@ -1,12 +1,16 @@
 name: Run and Compare Python Tests
 
 on:
-  pull_request:
-    branches: [main]
   workflow_call:
-
+  pull_request:
+    branches:
+      - dev
 jobs:
+  lint:
+    uses: ./.github/workflows/test-lint.yml
+
   test-pr-branch:
+    needs: lint
     runs-on: ubuntu-latest
     outputs:
       total: ${{ steps.extract-results.outputs.total }}
@@ -15,6 +19,8 @@ jobs:
       collection_errors: ${{ steps.check-collection.outputs.has_collection_errors }}
       no_tests_found: ${{ steps.check-collection.outputs.no_tests_found }}
       has_errors: ${{ steps.check-collection.outputs.has_errors }}
+      error_type: ${{ steps.check-collection.outputs.error_type }}
+      error_details: ${{ steps.check-collection.outputs.error_details }}
 
     steps:
       - name: Checkout PR Branch
@@ -56,34 +62,60 @@ jobs:
 
           echo "::debug::Collection completed, checking output file"
           echo "::debug::Collection output file size: $(wc -l collection_output.txt)"
+          echo "::debug::First 50 lines of collection output:"
+          head -n 50 collection_output.txt
 
           # Set default values
           HAS_COLLECTION_ERRORS="false"
           NO_TESTS_FOUND="false"
+          ERROR_TYPE="none"
+          ERROR_DETAILS="none"
 
           echo "::debug::Checking for collection errors"
           if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
             echo "::debug::Collection errors detected, extracting details"
-            echo "Collection errors detected:"
-            grep -A 10 -B 1 "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt
+            echo "::error::Test discovery errors detected - Python modules could not be imported correctly"
+            
+            # Attempt to identify specific error type
+            if grep -q "ImportError" collection_output.txt; then
+              ERROR_TYPE="ImportError"
+            elif grep -q "ModuleNotFoundError" collection_output.txt; then
+              ERROR_TYPE="ModuleNotFoundError"
+            elif grep -q "SyntaxError" collection_output.txt; then
+              ERROR_TYPE="SyntaxError"
+            elif grep -q "ERROR collecting" collection_output.txt; then
+              ERROR_TYPE="CollectionError"
+            elif grep -q "Interrupted:" collection_output.txt; then
+              ERROR_TYPE="Interrupted"
+            else 
+              ERROR_TYPE="UnknownError"
+            fi
+            
+            echo "::debug::Error type identified: $ERROR_TYPE"
+            echo "Discovery error type: $ERROR_TYPE"
             
             echo "::debug::Attempting to find specific error file"
             ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
-            ERROR_TYPE=$(grep -o "ImportError\|ModuleNotFoundError\|SyntaxError" collection_output.txt | head -1 || echo "Unknown error")
-            echo "::debug::Error file identification result: $ERROR_FILE (Error type: $ERROR_TYPE)"
+            echo "::debug::Error file identification result: $ERROR_FILE"
             
             if [[ "$ERROR_FILE" != "Unknown file" ]]; then
               echo "Error in file $ERROR_FILE"
-              echo "Error details:"
               echo "::debug::Extracting detailed error information for $ERROR_FILE"
-              grep -A 10 "$ERROR_FILE" collection_output.txt
+              grep -A 15 "$ERROR_FILE" collection_output.txt > error_details.txt
+              ERROR_DETAILS=$(cat error_details.txt | tr '\n' ' ' | sed 's/"/\\"/g')
+              echo "::debug::Error details extracted (truncated): ${ERROR_DETAILS:0:100}..."
+            else
+              # If we couldn't find a specific file, get general error info
+              grep -A 15 "$ERROR_TYPE" collection_output.txt > error_details.txt
+              ERROR_DETAILS=$(cat error_details.txt | tr '\n' ' ' | sed 's/"/\\"/g')
             fi
             
+            echo "::error::Discovery error details: ${ERROR_DETAILS:0:200}..."
             echo "::debug::Setting has_collection_errors=true in GitHub output"
             HAS_COLLECTION_ERRORS="true"
           else
             echo "::debug::No collection errors detected, checking test count"
-            echo "No collection errors detected"
+            echo "No discovery errors detected in PR branch"
             
             echo "::debug::Extracting test count from collection output"
             TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
@@ -93,14 +125,18 @@ jobs:
               echo "::warning::No tests were found in the PR branch"
               echo "::debug::Setting no_tests_found=true"
               NO_TESTS_FOUND="true"
+              ERROR_TYPE="NoTestsFound"
+              ERROR_DETAILS="No test files were discovered that match pytest's test discovery pattern"
             else  
-              echo "Found $TEST_COUNT tests"
+              echo "Found $TEST_COUNT tests in PR branch"
             fi
           fi
 
-          # Set multiple outputs to differentiate between error types
+          # Set all the outputs
           echo "has_collection_errors=$HAS_COLLECTION_ERRORS" >> $GITHUB_OUTPUT
           echo "no_tests_found=$NO_TESTS_FOUND" >> $GITHUB_OUTPUT
+          echo "error_type=$ERROR_TYPE" >> $GITHUB_OUTPUT
+          echo "error_details=$ERROR_DETAILS" >> $GITHUB_OUTPUT
 
           # For backward compatibility
           if [[ "$HAS_COLLECTION_ERRORS" == "true" || "$NO_TESTS_FOUND" == "true" ]]; then
@@ -113,6 +149,7 @@ jobs:
           cat collection_output.txt
 
       - name: Run tests on PR Branch
+        if: steps.check-collection.outputs.has_collection_errors != 'true'
         run: |
           set -x
           echo "::debug::Current working directory for test run: $(pwd)"
@@ -120,15 +157,18 @@ jobs:
           find . -name "test_*.py" -o -name "*_test.py" | sort
 
           echo "::debug::Running pytest with json report"
+          echo "Running tests on PR branch..."
           python -m pytest -vv --json-report --json-report-file=pr_results.json || true
 
           echo "::debug::Test run completed, checking if json results file exists"
           if [ -f pr_results.json ]; then
             echo "::debug::JSON results file size: $(wc -c pr_results.json)"
-            echo "::debug::JSON results file first 100 characters:"
-            head -c 100 pr_results.json
+            echo "::debug::JSON results file first 200 characters:"
+            head -c 200 pr_results.json
+            echo "Test results file successfully created for PR branch"
           else
             echo "::debug::WARNING: pr_results.json file was not created"
+            echo "::error::Failed to create test results file for PR branch"
           fi
 
       - name: Extract test results
@@ -137,6 +177,7 @@ jobs:
           set -x
           echo "::debug::Current branch: $(git rev-parse --abbrev-ref HEAD)"
           echo "PR_BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          echo "Processing test results for PR branch: $PR_BRANCH"
 
           echo "::debug::Running Python script to extract test results"
           python -c "
@@ -144,7 +185,7 @@ jobs:
           import sys
           import os
 
-          print('Debug: Starting test results extraction script')
+          print('Debug: Starting test results extraction script for PR branch')
 
           # Default values in case file doesn't exist or is invalid
           pr_total = 0
@@ -209,8 +250,10 @@ jobs:
 
           echo "::debug::GITHUB_OUTPUT file content:"
           cat $GITHUB_OUTPUT
+          echo "PR branch test results processed: ${{ steps.extract-results.outputs.passed }}/${{ steps.extract-results.outputs.total }} tests passed (${{ steps.extract-results.outputs.percentage }}%)"
 
   test-main-branch:
+    needs: lint
     runs-on: ubuntu-latest
     outputs:
       total: ${{ steps.extract-results.outputs.total }}
@@ -219,6 +262,8 @@ jobs:
       collection_errors: ${{ steps.check-collection.outputs.has_collection_errors }}
       no_tests_found: ${{ steps.check-collection.outputs.no_tests_found }}
       has_errors: ${{ steps.check-collection.outputs.has_errors }}
+      error_type: ${{ steps.check-collection.outputs.error_type }}
+      error_details: ${{ steps.check-collection.outputs.error_details }}
 
     steps:
       - name: Checkout main branch
@@ -262,12 +307,37 @@ jobs:
 
           echo "::debug::Collection completed, checking output file"
           echo "::debug::Collection output file size: $(wc -l collection_output.txt)"
+          echo "::debug::First 50 lines of collection output:"
+          head -n 50 collection_output.txt
+
+          # Set default values
+          HAS_COLLECTION_ERRORS="false"
+          NO_TESTS_FOUND="false"
+          ERROR_TYPE="none"
+          ERROR_DETAILS="none"
 
           echo "::debug::Checking for collection errors"
           if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
             echo "::debug::Collection errors detected, extracting details"
-            echo "Collection errors detected:"
-            grep -A 10 -B 1 "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt
+            echo "::warning::Test discovery errors detected in main branch - Python modules could not be imported correctly"
+            
+            # Attempt to identify specific error type
+            if grep -q "ImportError" collection_output.txt; then
+              ERROR_TYPE="ImportError"
+            elif grep -q "ModuleNotFoundError" collection_output.txt; then
+              ERROR_TYPE="ModuleNotFoundError"
+            elif grep -q "SyntaxError" collection_output.txt; then
+              ERROR_TYPE="SyntaxError"
+            elif grep -q "ERROR collecting" collection_output.txt; then
+              ERROR_TYPE="CollectionError"
+            elif grep -q "Interrupted:" collection_output.txt; then
+              ERROR_TYPE="Interrupted"
+            else 
+              ERROR_TYPE="UnknownError"
+            fi
+            
+            echo "::debug::Error type identified: $ERROR_TYPE"
+            echo "Main branch discovery error type: $ERROR_TYPE"
             
             echo "::debug::Attempting to find specific error file"
             ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
@@ -275,16 +345,22 @@ jobs:
             
             if [[ "$ERROR_FILE" != "Unknown file" ]]; then
               echo "Error in file $ERROR_FILE"
-              echo "Error details:"
               echo "::debug::Extracting detailed error information for $ERROR_FILE"
-              grep -A 10 "$ERROR_FILE" collection_output.txt
+              grep -A 15 "$ERROR_FILE" collection_output.txt > error_details.txt
+              ERROR_DETAILS=$(cat error_details.txt | tr '\n' ' ' | sed 's/"/\\"/g')
+              echo "::debug::Error details extracted (truncated): ${ERROR_DETAILS:0:100}..."
+            else
+              # If we couldn't find a specific file, get general error info
+              grep -A 15 "$ERROR_TYPE" collection_output.txt > error_details.txt
+              ERROR_DETAILS=$(cat error_details.txt | tr '\n' ' ' | sed 's/"/\\"/g')
             fi
             
-            echo "::debug::Setting has_errors=true in GitHub output"
-            echo "has_errors=true" >> $GITHUB_OUTPUT
+            echo "::warning::Main branch discovery error details: ${ERROR_DETAILS:0:200}..."
+            echo "::debug::Setting has_collection_errors=true in GitHub output"
+            HAS_COLLECTION_ERRORS="true"
           else
             echo "::debug::No collection errors detected, checking test count"
-            echo "No collection errors detected"
+            echo "No discovery errors detected in main branch"
             
             echo "::debug::Extracting test count from collection output"
             TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
@@ -292,19 +368,33 @@ jobs:
             
             if [[ "$TEST_COUNT" == "0" ]]; then
               echo "::warning::No tests were found in the main branch"
-              echo "::debug::Setting has_errors=true due to zero tests found"
-              echo "has_errors=true" >> $GITHUB_OUTPUT
+              echo "::debug::Setting no_tests_found=true"
+              NO_TESTS_FOUND="true"
+              ERROR_TYPE="NoTestsFound"
+              ERROR_DETAILS="No test files were discovered in main branch that match pytest's test discovery pattern"
             else  
-              echo "Found $TEST_COUNT tests"
-              echo "::debug::Setting has_errors=false"
-              echo "has_errors=false" >> $GITHUB_OUTPUT
+              echo "Found $TEST_COUNT tests in main branch"
             fi
+          fi
+
+          # Set all the outputs
+          echo "has_collection_errors=$HAS_COLLECTION_ERRORS" >> $GITHUB_OUTPUT
+          echo "no_tests_found=$NO_TESTS_FOUND" >> $GITHUB_OUTPUT
+          echo "error_type=$ERROR_TYPE" >> $GITHUB_OUTPUT
+          echo "error_details=$ERROR_DETAILS" >> $GITHUB_OUTPUT
+
+          # For backward compatibility
+          if [[ "$HAS_COLLECTION_ERRORS" == "true" || "$NO_TESTS_FOUND" == "true" ]]; then
+            echo "has_errors=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_errors=false" >> $GITHUB_OUTPUT
           fi
 
           echo "::debug::Full collection output for debugging:"
           cat collection_output.txt
 
       - name: Run tests on main branch
+        if: steps.check-collection.outputs.has_collection_errors != 'true'
         run: |
           set -x
           echo "::debug::Current working directory for test run: $(pwd)"
@@ -312,15 +402,18 @@ jobs:
           find . -name "test_*.py" -o -name "*_test.py" | sort
 
           echo "::debug::Running pytest with json report"
+          echo "Running tests on main branch..."
           python -m pytest -vv --json-report --json-report-file=main_results.json || true
 
           echo "::debug::Test run completed, checking if json results file exists"
           if [ -f main_results.json ]; then
             echo "::debug::JSON results file size: $(wc -c main_results.json)"
-            echo "::debug::JSON results file first 100 characters:"
-            head -c 100 main_results.json
+            echo "::debug::JSON results file first 200 characters:"
+            head -c 200 main_results.json
+            echo "Test results file successfully created for main branch"
           else
             echo "::debug::WARNING: main_results.json file was not created"
+            echo "::warning::Failed to create test results file for main branch"
           fi
 
       - name: Extract test results
@@ -328,12 +421,14 @@ jobs:
         run: |
           set -x
           echo "::debug::Running Python script to extract test results"
+          echo "Processing test results for main branch"
+
           python -c "
           import json
           import sys
           import os
 
-          print('Debug: Starting test results extraction script')
+          print('Debug: Starting test results extraction script for main branch')
 
           # Default values in case file doesn't exist or is invalid
           main_total = 0
@@ -398,6 +493,7 @@ jobs:
 
           echo "::debug::GITHUB_OUTPUT file content:"
           cat $GITHUB_OUTPUT
+          echo "Main branch test results processed: ${{ steps.extract-results.outputs.passed }}/${{ steps.extract-results.outputs.total }} tests passed (${{ steps.extract-results.outputs.percentage }}%)"
 
   compare-results:
     needs: [test-pr-branch, test-main-branch]
@@ -414,30 +510,49 @@ jobs:
       - name: Check for collection errors
         run: |
           set -x
-          echo "::debug::Retrieving collection error status"
-          PR_ERRORS="${{ needs.test-pr-branch.outputs.collection_errors }}"
-          MAIN_ERRORS="${{ needs.test-main-branch.outputs.collection_errors }}"
+          echo "::debug::Retrieving collection error status information"
+          PR_COLLECTION_ERRORS="${{ needs.test-pr-branch.outputs.collection_errors }}"
+          PR_NO_TESTS="${{ needs.test-pr-branch.outputs.no_tests_found }}"
+          PR_ERROR_TYPE="${{ needs.test-pr-branch.outputs.error_type }}"
+          PR_ERROR_DETAILS="${{ needs.test-pr-branch.outputs.error_details }}"
+          MAIN_COLLECTION_ERRORS="${{ needs.test-main-branch.outputs.collection_errors }}"
 
-          echo "::debug::PR branch errors: $PR_ERRORS"
-          echo "::debug::Main branch errors: $MAIN_ERRORS"
+          echo "::debug::PR branch collection errors: $PR_COLLECTION_ERRORS"
+          echo "::debug::PR branch no tests found: $PR_NO_TESTS"
+          echo "::debug::PR branch error type: $PR_ERROR_TYPE"
+          echo "::debug::Main branch collection errors: $MAIN_COLLECTION_ERRORS"
 
-          if [[ "$PR_ERRORS" == "true" ]]; then
-            echo "::debug::PR branch has errors, failing workflow"
-            echo "::error::Test collection errors or no tests detected in PR branch"
-            echo "❌ PR branch has test collection errors or no tests"
+          # Distinct error handling for PR branch
+          if [[ "$PR_COLLECTION_ERRORS" == "true" ]]; then
+            echo "::debug::PR branch has discovery errors, failing workflow"
+            echo "::error::Test discovery errors in PR branch: $PR_ERROR_TYPE"
+            echo "::error::$PR_ERROR_DETAILS"
+            echo "❌ PR branch has test discovery errors. Python modules could not be imported correctly."
             exit 1
           fi
 
-          if [[ "$MAIN_ERRORS" == "true" ]]; then
-            echo "::debug::Main branch has errors, displaying warning"
-            echo "⚠️ Main branch has test collection errors or no tests"
-            # Don't fail the workflow, just warn that main branch has issues
+          if [[ "$PR_NO_TESTS" == "true" ]]; then
+            echo "::debug::PR branch has no tests, failing workflow"
+            echo "::error::No tests were found in the PR branch"
+            echo "❌ PR branch has no tests detected. Please add test files that match pytest's discovery pattern."
+            exit 1
+          fi
+
+          # Warning for main branch issues (not a failure)
+          if [[ "$MAIN_COLLECTION_ERRORS" == "true" ]]; then
+            echo "::debug::Main branch has discovery errors, displaying warning"
+            echo "⚠️ Main branch has test discovery errors. Tests will still be compared but results may not be accurate."
+          fi
+
+          if [[ "${{ needs.test-main-branch.outputs.no_tests_found }}" == "true" ]]; then
+            echo "::debug::Main branch has no tests, displaying warning"
+            echo "⚠️ Main branch has no tests detected. PR branch tests will still be evaluated."
           fi
 
       - name: Compare test results
         run: |
           set -x
-          echo "::debug::Starting test results comparison"
+          echo "::debug::Starting detailed test results comparison"
 
           # Print all input values for debugging
           echo "::debug::Main branch total: ${{ needs.test-main-branch.outputs.total }}"
@@ -447,6 +562,7 @@ jobs:
           echo "::debug::PR branch passed: ${{ needs.test-pr-branch.outputs.passed }}"
           echo "::debug::PR branch percentage: ${{ needs.test-pr-branch.outputs.percentage }}"
 
+          echo "Test Results Summary:"
           echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
           echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
 
@@ -454,7 +570,7 @@ jobs:
           if [[ "${{ needs.test-pr-branch.outputs.total }}" == "0" ]]; then
             echo "::debug::PR branch has no tests, failing workflow"
             echo "::error::No tests were found in the PR branch"
-            echo "❌ PR branch has no tests detected"
+            echo "❌ PR branch has no tests detected. Please add test files that match pytest's discovery pattern."
             exit 1
           fi
 
@@ -463,11 +579,28 @@ jobs:
           MAIN_PASSED=${{ needs.test-main-branch.outputs.passed }}
           PR_PERCENTAGE=${{ needs.test-pr-branch.outputs.percentage }}
           MAIN_PERCENTAGE=${{ needs.test-main-branch.outputs.percentage }}
+          PR_TOTAL=${{ needs.test-pr-branch.outputs.total }}
+          MAIN_TOTAL=${{ needs.test-main-branch.outputs.total }}
 
           echo "::debug::PR_PASSED=$PR_PASSED"
           echo "::debug::MAIN_PASSED=$MAIN_PASSED"
           echo "::debug::PR_PERCENTAGE=$PR_PERCENTAGE"
           echo "::debug::MAIN_PERCENTAGE=$MAIN_PERCENTAGE"
+          echo "::debug::PR_TOTAL=$PR_TOTAL"
+          echo "::debug::MAIN_TOTAL=$MAIN_TOTAL"
+
+          # Handle case where main has no tests
+          if [[ "$MAIN_TOTAL" == "0" ]]; then
+            echo "::debug::Main branch has no tests, checking PR branch tests only"
+            if [[ "$PR_PERCENTAGE" == "100.00" ]]; then
+              echo "✅ All tests in PR branch passed (main branch has no tests)"
+              exit 0
+            else
+              echo "❌ PR branch tests are not passing 100%"
+              echo "  - Pass percentage: $PR_PERCENTAGE%"
+              exit 1
+            fi
+          fi
 
           echo "::debug::Performing comparison with bc"
           echo "::debug::Comparing passed tests: $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l)"
@@ -476,11 +609,35 @@ jobs:
           if (( $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l) )); then
             echo "::debug::PR branch has equal or better results"
             echo "✅ PR branch has equal or better test results than main branch"
+            
+            # Additional verbose information about improvement
+            if (( $(echo "$PR_PASSED > $MAIN_PASSED" | bc -l) )); then
+              IMPROVEMENT=$(( $PR_PASSED - $MAIN_PASSED ))
+              echo "  - Improvement: $IMPROVEMENT more passing tests than main branch"
+            fi
+            
+            if (( $(echo "$PR_PERCENTAGE > $MAIN_PERCENTAGE" | bc -l) )); then
+              PERCENTAGE_IMPROVEMENT=$(echo "$PR_PERCENTAGE - $MAIN_PERCENTAGE" | bc -l)
+              echo "  - Percentage improvement: +${PERCENTAGE_IMPROVEMENT}% compared to main branch"
+            fi
+            
             exit 0
           else
             echo "::debug::PR branch has worse results"
             echo "❌ PR branch has worse test results than main branch"
             echo "  - Passed tests: $PR_PASSED vs $MAIN_PASSED on main"
             echo "  - Pass percentage: $PR_PERCENTAGE% vs $MAIN_PERCENTAGE% on main"
+            
+            # Calculate regression metrics
+            if (( $(echo "$PR_PASSED < $MAIN_PASSED" | bc -l) )); then
+              REGRESSION=$(( $MAIN_PASSED - $PR_PASSED ))
+              echo "  - Regression: $REGRESSION fewer passing tests than main branch"
+            fi
+            
+            if (( $(echo "$PR_PERCENTAGE < $MAIN_PERCENTAGE" | bc -l) )); then
+              PERCENTAGE_REGRESSION=$(echo "$MAIN_PERCENTAGE - $PR_PERCENTAGE" | bc -l)
+              echo "  - Percentage regression: -${PERCENTAGE_REGRESSION}% compared to main branch"
+            fi
+            
             exit 1
           fi
