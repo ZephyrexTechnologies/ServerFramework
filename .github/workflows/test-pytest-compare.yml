@@ -42,8 +42,10 @@ jobs:
           with open('pr_results.json') as f:
               pr_results = json.load(f)
 
-          pr_total = pr_results['summary']['total']
-          pr_passed = pr_results['summary']['passed']
+          # Handle missing keys with default values
+          summary = pr_results.get('summary', {})
+          pr_total = summary.get('total', 0)
+          pr_passed = summary.get('passed', 0)
           pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
 
           print(f'Total tests: {pr_total}')
@@ -96,8 +98,10 @@ jobs:
           with open('main_results.json') as f:
               main_results = json.load(f)
 
-          main_total = main_results['summary']['total']
-          main_passed = main_results['summary']['passed']
+          # Handle missing keys with default values
+          summary = main_results.get('summary', {})
+          main_total = summary.get('total', 0)
+          main_passed = summary.get('passed', 0)
           main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
 
           print(f'Total tests: {main_total}')
