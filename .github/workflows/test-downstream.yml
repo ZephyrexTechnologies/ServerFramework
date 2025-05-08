@@ -23,9 +23,10 @@ jobs:
           IS_FROM_DEV="false"
 
           # For pull requests, check if the target branch is dev
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "dev" ]]; then
+          # For pull requests, check if the source branch is dev
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.head_ref }}" == "dev" ]]; then
             IS_FROM_DEV="true"
-            echo "This is a pull request targeting the dev branch"
+            echo "This is a pull request coming from the dev branch"
           # For directly triggered workflows, check the current branch
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
             IS_FROM_DEV="true"
