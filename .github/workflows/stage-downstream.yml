@@ -155,7 +155,6 @@ jobs:
           # Initialization for waiting logic
           MAX_RETRIES=30             # Maximum number of polling attempts
           POLLING_INTERVAL=30        # Wait time between polls in seconds
-          MAX_WAIT_TIME=$((MAX_RETRIES * POLLING_INTERVAL))  # Total wait time in seconds
 
           # Loop through each PR entry
           for PR_ENTRY in $PR_DATA; do
@@ -166,15 +165,27 @@ jobs:
             
             # Initialize flags
             ALL_CHECKS_COMPLETED=false
+            FOUND_FAILURE=false
             RETRY_COUNT=0
             
-            while [ "$ALL_CHECKS_COMPLETED" = "false" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            # First check if PR is mergeable - quick fail if not
+            PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
+            
+            MERGEABLE=$(echo $PR_STATUS | jq -r '.mergeable // "unknown"')
+            MERGEABLE_STATE=$(echo $PR_STATUS | jq -r '.mergeable_state // "unknown"')
+            
+            # If PR is clearly unmergeable, fail fast
+            if [ "$MERGEABLE" = "false" ]; then
+              echo "::error::PR #$PR_NUMBER in repository $REPO is not mergeable (state: $MERGEABLE_STATE)"
+              UNMERGEABLE_PRS+=("$REPO:$PR_NUMBER")
+              continue
+            fi
+            
+            # Begin polling loop
+            while [ "$ALL_CHECKS_COMPLETED" = "false" ] && [ "$FOUND_FAILURE" = "false" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
               echo "Polling attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
-              
-              # Get the PR status
-              PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
               
               # Get the PR head SHA
               PR_SHA=$(echo $PR_STATUS | jq -r .head.sha)
@@ -190,7 +201,7 @@ jobs:
                 sleep $POLLING_INTERVAL
                 RETRY_COUNT=$((RETRY_COUNT + 1))
                 continue
-              }
+              fi
               
               # Get check and status counts
               TOTAL_CHECKS=$(echo $PR_CHECKS | jq '.total_count')
@@ -207,7 +218,17 @@ jobs:
                   continue
                 fi
               else
-                # Check if all runs are completed
+                # Check if there are any failed checks (FAIL FAST!)
+                FAILED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")] | length')
+                
+                if [ "$FAILED_CHECKS" -gt 0 ]; then
+                  echo "::error::Found $FAILED_CHECKS failed checks in PR #$PR_NUMBER in $REPO - failing fast!"
+                  FAILED_PRS+=("$REPO:$PR_NUMBER")
+                  FOUND_FAILURE=true
+                  break
+                fi
+                
+                # Check completion status
                 COMPLETED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.status == "completed")] | length')
                 PENDING_CHECKS=$((TOTAL_CHECKS - COMPLETED_CHECKS))
                 
@@ -226,41 +247,37 @@ jobs:
               fi
             done
             
-            # After waiting, check final status
+            # Check outcomes based on how we exited the polling loop
+            if [ "$FOUND_FAILURE" = "true" ]; then
+              # We already added this PR to FAILED_PRS and broke out early - continue to next PR
+              continue
+            fi
+            
             if [ "$ALL_CHECKS_COMPLETED" = "false" ]; then
-              echo "::warning::Checks did not complete within the maximum wait time ($MAX_WAIT_TIME seconds) for PR #$PR_NUMBER in $REPO"
+              echo "::warning::Checks did not complete within the maximum wait time for PR #$PR_NUMBER in $REPO"
               INCOMPLETE_CHECKS_PRS+=("$REPO:$PR_NUMBER")
               continue
             fi
             
-            # Now that checks are completed, verify if they passed
+            # Now that checks are completed without failures, verify final status
             if [ "$TOTAL_CHECKS" -gt 0 ]; then
-              FAILED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.conclusion != "success" and .conclusion != "neutral" and .status == "completed")] | length')
+              # Double-check for any non-success status (other than neutral)
+              ALL_CHECKS_PASSED=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.conclusion != "success" and .conclusion != "neutral")] | length')
               
-              if [ "$FAILED_CHECKS" -gt 0 ]; then
-                echo "::warning::PR #$PR_NUMBER in repository $REPO has $FAILED_CHECKS failed checks"
+              if [ "$ALL_CHECKS_PASSED" -gt 0 ]; then
+                echo "::warning::PR #$PR_NUMBER in repository $REPO has unsuccessful checks"
                 FAILED_PRS+=("$REPO:$PR_NUMBER")
+                continue
               fi
             fi
             
-            # Check if PR is mergeable
-            # Note: Sometimes GitHub's mergeable status might be null while it's being calculated
+            # Final check for mergeability - it might have changed during checks
+            PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
+            
             MERGEABLE=$(echo $PR_STATUS | jq -r '.mergeable // "unknown"')
             MERGEABLE_STATE=$(echo $PR_STATUS | jq -r '.mergeable_state // "unknown"')
-            
-            # If mergeable is null, wait and poll again
-            if [ "$MERGEABLE" = "null" ] || [ "$MERGEABLE" = "unknown" ]; then
-              echo "Mergeable status is being calculated. Waiting briefly..."
-              sleep 15
-              
-              # Get updated PR status
-              PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
-              
-              MERGEABLE=$(echo $PR_STATUS | jq -r '.mergeable // "unknown"')
-              MERGEABLE_STATE=$(echo $PR_STATUS | jq -r '.mergeable_state // "unknown"')
-            fi
             
             echo "Mergeable: $MERGEABLE"
             echo "Mergeable state: $MERGEABLE_STATE"
@@ -268,7 +285,10 @@ jobs:
             if [ "$MERGEABLE" = "false" ] || [ "$MERGEABLE_STATE" = "dirty" ] || [ "$MERGEABLE_STATE" = "blocked" ]; then
               echo "::warning::PR #$PR_NUMBER in repository $REPO is not mergeable (state: $MERGEABLE_STATE)"
               UNMERGEABLE_PRS+=("$REPO:$PR_NUMBER")
+              continue
             fi
+            
+            echo "✅ PR #$PR_NUMBER in repository $REPO is passing all checks and ready to merge!"
           done
 
           # Comprehensive failure report

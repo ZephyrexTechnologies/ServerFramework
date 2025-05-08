@@ -10,6 +10,8 @@ jobs:
       total: ${{ steps.extract-results.outputs.total }}
       passed: ${{ steps.extract-results.outputs.passed }}
       percentage: ${{ steps.extract-results.outputs.percentage }}
+      has_errors: ${{ steps.extract-results.outputs.has_errors }}
+      error_message: ${{ steps.extract-results.outputs.error_message }}
 
     steps:
       - name: Checkout PR Branch
@@ -27,8 +29,21 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run tests on PR Branch
+        id: run-tests
         run: |
-          python -m pytest -q --json-report --json-report-file=pr_results.json || true
+          # Save both stdout and stderr to files
+          python -m pytest -q --json-report --json-report-file=pr_results.json > pr_stdout.txt 2> pr_stderr.txt || true
+
+          # Check for collection errors
+          if grep -q "Interrupted: .* error during collection" pr_stderr.txt; then
+            echo "Collection errors found in PR branch!"
+            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
+            # Save error details for later
+            cat pr_stderr.txt > pr_errors.txt
+          else
+            echo "No collection errors found in PR branch"
+            echo "has_collection_errors=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Extract test results
         id: extract-results
@@ -38,7 +53,25 @@ jobs:
           import json
           import sys
           import os
+          import re
 
+          # Check for collection errors from the previous step
+          has_errors = '${{ steps.run-tests.outputs.has_collection_errors }}' == 'true'
+          error_message = ''
+
+          if has_errors:
+              # Read error details if available
+              if os.path.exists('pr_errors.txt'):
+                  with open('pr_errors.txt', 'r') as f:
+                      error_text = f.read()
+                      # Extract the error summary line
+                      error_match = re.search(r'(Interrupted: .* error during collection)', error_text)
+                      if error_match:
+                          error_message = error_match.group(1)
+                      else:
+                          error_message = 'Collection errors found in tests'
+
+          # Parse test results
           with open('pr_results.json') as f:
               pr_results = json.load(f)
 
@@ -52,11 +85,16 @@ jobs:
           print(f'Passed tests: {pr_passed}')
           print(f'Pass percentage: {pr_percentage:.2f}%')
 
+          if has_errors:
+              print(f'Collection errors found: {error_message}')
+
           # Set outputs for GitHub Actions
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'total={pr_total}\\n')
               f.write(f'passed={pr_passed}\\n')
               f.write(f'percentage={pr_percentage:.2f}\\n')
+              f.write(f'has_errors={str(has_errors).lower()}\\n')
+              f.write(f'error_message={error_message}\\n')
           "
 
   test-main-branch:
@@ -65,6 +103,8 @@ jobs:
       total: ${{ steps.extract-results.outputs.total }}
       passed: ${{ steps.extract-results.outputs.passed }}
       percentage: ${{ steps.extract-results.outputs.percentage }}
+      has_errors: ${{ steps.extract-results.outputs.has_errors }}
+      error_message: ${{ steps.extract-results.outputs.error_message }}
 
     steps:
       - name: Checkout main branch
@@ -84,8 +124,21 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run tests on main branch
+        id: run-tests
         run: |
-          python -m pytest -q --json-report --json-report-file=main_results.json || true
+          # Save both stdout and stderr to files
+          python -m pytest -q --json-report --json-report-file=main_results.json > main_stdout.txt 2> main_stderr.txt || true
+
+          # Check for collection errors
+          if grep -q "Interrupted: .* error during collection" main_stderr.txt; then
+            echo "Collection errors found in main branch!"
+            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
+            # Save error details for later
+            cat main_stderr.txt > main_errors.txt
+          else
+            echo "No collection errors found in main branch"
+            echo "has_collection_errors=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Extract test results
         id: extract-results
@@ -94,7 +147,25 @@ jobs:
           import json
           import sys
           import os
+          import re
 
+          # Check for collection errors from the previous step
+          has_errors = '${{ steps.run-tests.outputs.has_collection_errors }}' == 'true'
+          error_message = ''
+
+          if has_errors:
+              # Read error details if available
+              if os.path.exists('main_errors.txt'):
+                  with open('main_errors.txt', 'r') as f:
+                      error_text = f.read()
+                      # Extract the error summary line
+                      error_match = re.search(r'(Interrupted: .* error during collection)', error_text)
+                      if error_match:
+                          error_message = error_match.group(1)
+                      else:
+                          error_message = 'Collection errors found in tests'
+
+          # Parse test results
           with open('main_results.json') as f:
               main_results = json.load(f)
 
@@ -108,11 +179,16 @@ jobs:
           print(f'Passed tests: {main_passed}')
           print(f'Pass percentage: {main_percentage:.2f}%')
 
+          if has_errors:
+              print(f'Collection errors found: {error_message}')
+
           # Set outputs for GitHub Actions
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'total={main_total}\\n')
               f.write(f'passed={main_passed}\\n')
               f.write(f'percentage={main_percentage:.2f}\\n')
+              f.write(f'has_errors={str(has_errors).lower()}\\n')
+              f.write(f'error_message={error_message}\\n')
           "
 
   compare-results:
@@ -125,9 +201,23 @@ jobs:
           echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
           echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
 
-          # Use Python for comparison instead of bc
+          # Check for collection errors
+          PR_HAS_ERRORS="${{ needs.test-pr-branch.outputs.has_errors }}"
+          MAIN_HAS_ERRORS="${{ needs.test-main-branch.outputs.has_errors }}"
+
+          if [ "$PR_HAS_ERRORS" == "true" ]; then
+            echo "⚠️ PR branch has collection errors: ${{ needs.test-pr-branch.outputs.error_message }}"
+          fi
+
+          if [ "$MAIN_HAS_ERRORS" == "true" ]; then
+            echo "ℹ️ Main branch has collection errors: ${{ needs.test-main-branch.outputs.error_message }}"
+          fi
+
+          # Use Python for more complex comparison logic
           python -c "
           import sys
+
+          # Test counts
           pr_total = float('${{ needs.test-pr-branch.outputs.total }}')
           main_total = float('${{ needs.test-main-branch.outputs.total }}')
           pr_passed = float('${{ needs.test-pr-branch.outputs.passed }}')
@@ -135,25 +225,49 @@ jobs:
           pr_percentage = float('${{ needs.test-pr-branch.outputs.percentage }}')
           main_percentage = float('${{ needs.test-main-branch.outputs.percentage }}')
 
-          # First check if tests exist
+          # Error states
+          pr_has_errors = '${{ needs.test-pr-branch.outputs.has_errors }}' == 'true'
+          main_has_errors = '${{ needs.test-main-branch.outputs.has_errors }}' == 'true'
+
+          # First check for collection errors
+          if pr_has_errors and not main_has_errors:
+              print('❌ PR branch has collection errors but main branch does not!')
+              print('   This is a regression. Please fix the collection errors in your branch.')
+              sys.exit(1)
+
+          # Check for no tests
           if pr_total == 0:
-              print('⚠️ Warning: No tests were found in the PR branch!')
-              # If main branch has tests but PR doesn't, that's a failure
               if main_total > 0:
-                  print(f'❌ Main branch has {main_total} tests but PR branch has none')
+                  print('❌ PR branch has no tests but main branch has {main_total} tests')
+                  print('   This is a regression. No tests were collected in your branch.')
                   sys.exit(1)
               else:
-                  # Both have no tests, warn but don't fail
-                  print('⚠️ Neither branch has tests. This should be addressed!')
+                  print('⚠️ Neither branch has tests.')
+                  if pr_has_errors or main_has_errors:
+                      print('   Both branches have collection errors that need to be addressed.')
                   sys.exit(0)
 
-          # Now we know the PR has tests, compare with main
-          if pr_passed >= main_passed and pr_percentage >= main_percentage:
-              print(f'✅ PR branch has equal or better test results than main branch')
+          # Compare test results only if both branches have tests with no collection errors
+          # or if both have collection errors (existing condition)
+          if (not pr_has_errors and not main_has_errors) or (pr_has_errors and main_has_errors):
+              if pr_passed >= main_passed and pr_percentage >= main_percentage:
+                  print('✅ PR branch has equal or better test results than main branch')
+                  if pr_has_errors and main_has_errors:
+                      print('   Note: Both branches have collection errors that should be fixed.')
+                  sys.exit(0)
+              else:
+                  print('❌ PR branch has worse test results than main branch')
+                  print(f'  - Passed tests: {pr_passed} vs {main_passed} on main')
+                  print(f'  - Pass percentage: {pr_percentage}% vs {main_percentage}% on main')
+                  sys.exit(1)
+
+          # If we get here, it's because the PR has fewer collection errors than main
+          # which is technically an improvement
+          if not pr_has_errors and main_has_errors:
+              print('✅ PR branch IMPROVES on main branch by fixing collection errors!')
               sys.exit(0)
-          else:
-              print(f'❌ PR branch has worse test results than main branch')
-              print(f'  - Passed tests: {pr_passed} vs {main_passed} on main')
-              print(f'  - Pass percentage: {pr_percentage}% vs {main_percentage}% on main')
-              sys.exit(1)
+
+          # Fallback (shouldn't reach here with our logic)
+          print('⚠️ Unexpected comparison state. Allowing tests to pass.')
+          sys.exit(0)
           "
