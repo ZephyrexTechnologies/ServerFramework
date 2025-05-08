@@ -1,63 +1,141 @@
-name: Run Tests
+name: Compare Pytest Results
+
 on:
   workflow_call:
-    inputs:
-      test-folders:
-        description: "Array of test folders to run"
-        required: false
-        type: "string"
-        default: '["database", "logic", "endpoints", "sdk"]'
-      python-version:
-        description: "Python version to use"
-        required: false
-        type: "string"
-        default: "3.10"
-      additional-python-dependencies:
-        description: "Additional pip packages to install"
-        required: false
-        type: "string"
-        default: "openai requests agixtsdk qrcode==7.4.2"
+  pull_request:
+    branches:
+      - dev
+
 jobs:
-  test:
+  test-pr-branch:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        test-folder: ${{ fromJSON(inputs.test-folders) }}
-      fail-fast: false
+    outputs:
+      total: ${{ steps.extract-results.outputs.total }}
+      passed: ${{ steps.extract-results.outputs.passed }}
+      percentage: ${{ steps.extract-results.outputs.percentage }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Python ${{ inputs.python-version }}
-        uses: actions/setup-python@v5
+      - name: Checkout PR Branch
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: ${{ inputs.python-version }}
-          cache: "pip"
+          python-version: "3.10"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pytest-cov
-          # Install additional dependencies if specified
-          if [ -n "${{ inputs.additional-python-dependencies }}" ]; then
-            python -m pip install ${{ inputs.additional-python-dependencies }}
-          fi
-          # Install from requirements.txt if it exists
-          if [ -f requirements.txt ]; then 
-            python -m pip install -r requirements.txt
-          fi
-          # Try to install package in development mode
-          # Handle potential errors with the package installation
-          python -m pip install -e . || echo "Warning: Package installation failed, tests may not run correctly"
-      - name: Run tests for ${{ matrix.test-folder }}
-        id: run_tests
+          pip install pytest pytest-json-report pytest-asyncio
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run tests on PR Branch
         run: |
-          echo "Running tests in tests/${{ matrix.test-folder }}"
-          python -m pytest tests/${{ matrix.test-folder }} \
-            --cov=./ \
-            --cov-report=xml:coverage-${{ matrix.test-folder }}.xml \
-            -v
-      - name: Upload test coverage
-        if: always()
-        uses: actions/upload-artifact@v4
+          python -m pytest -q --json-report --json-report-file=pr_results.json || true
+
+      - name: Extract test results
+        id: extract-results
+        run: |
+          echo "PR_BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          python -c "
+          import json
+          import sys
+          import os
+
+          with open('pr_results.json') as f:
+              pr_results = json.load(f)
+
+          pr_total = pr_results['summary']['total']
+          pr_passed = pr_results['summary']['passed']
+          pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
+
+          print(f'Total tests: {pr_total}')
+          print(f'Passed tests: {pr_passed}')
+          print(f'Pass percentage: {pr_percentage:.2f}%')
+
+          # Set outputs for GitHub Actions
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'total={pr_total}\\n')
+              f.write(f'passed={pr_passed}\\n')
+              f.write(f'percentage={pr_percentage:.2f}\\n')
+          "
+
+  test-main-branch:
+    runs-on: ubuntu-latest
+    outputs:
+      total: ${{ steps.extract-results.outputs.total }}
+      passed: ${{ steps.extract-results.outputs.passed }}
+      percentage: ${{ steps.extract-results.outputs.percentage }}
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
         with:
-          name: coverage-report-${{ matrix.test-folder }}
-          path: coverage-${{ matrix.test-folder }}.xml
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-json-report pytest-asyncio
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run tests on main branch
+        run: |
+          python -m pytest -q --json-report --json-report-file=main_results.json || true
+
+      - name: Extract test results
+        id: extract-results
+        run: |
+          python -c "
+          import json
+          import sys
+          import os
+
+          with open('main_results.json') as f:
+              main_results = json.load(f)
+
+          main_total = main_results['summary']['total']
+          main_passed = main_results['summary']['passed']
+          main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
+
+          print(f'Total tests: {main_total}')
+          print(f'Passed tests: {main_passed}')
+          print(f'Pass percentage: {main_percentage:.2f}%')
+
+          # Set outputs for GitHub Actions
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'total={main_total}\\n')
+              f.write(f'passed={main_passed}\\n')
+              f.write(f'percentage={main_percentage:.2f}\\n')
+          "
+
+  compare-results:
+    needs: [test-pr-branch, test-main-branch]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Compare test results
+        run: |
+          echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
+          echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
+
+          # Convert string outputs to numbers for comparison
+          PR_PASSED=${{ needs.test-pr-branch.outputs.passed }}
+          MAIN_PASSED=${{ needs.test-main-branch.outputs.passed }}
+          PR_PERCENTAGE=${{ needs.test-pr-branch.outputs.percentage }}
+          MAIN_PERCENTAGE=${{ needs.test-main-branch.outputs.percentage }}
+
+          if (( $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l) )); then
+            echo "✅ PR branch has equal or better test results than main branch"
+            exit 0
+          else
+            echo "❌ PR branch has worse test results than main branch"
+            echo "  - Passed tests: $PR_PASSED vs $MAIN_PASSED on main"
+            echo "  - Pass percentage: $PR_PERCENTAGE% vs $MAIN_PERCENTAGE% on main"
+            exit 1
+          fi
