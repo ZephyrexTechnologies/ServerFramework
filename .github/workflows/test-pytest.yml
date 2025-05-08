@@ -1,4 +1,4 @@
-name: Run and Compare Python Tests
+name: Compare Pytest Results
 
 on:
   workflow_call:
