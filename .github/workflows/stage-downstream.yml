@@ -27,10 +27,6 @@ jobs:
     needs: validate-pr-source
     if: needs.validate-pr-source.outputs.is_from_dev == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      downstream_prs: ${{ steps.create_prs.outputs.downstream_prs }}
-      downstream_pr_numbers: ${{ steps.create_prs.outputs.downstream_pr_numbers }}
-      downstream_repo_names: ${{ steps.create_prs.outputs.downstream_repo_names }}
     permissions:
       contents: write
       pull-requests: write
@@ -52,12 +48,11 @@ jobs:
         run: |
           echo "REPOS=$(echo ${{ secrets.DOWNSTREAM_REPOSITORIES }} | tr ',' ' ')" >> $GITHUB_ENV
 
-      - name: Create downstream pull requests
+      - name: Create or update downstream pull requests
         id: create_prs
         run: |
-          PR_URLS=()
-          PR_NUMBERS=()
-          REPO_NAMES=()
+          # Arrays to store PR information
+          PR_DATA=()
 
           for REPO in $REPOS; do
             echo "Processing downstream repository: $REPO"
@@ -117,10 +112,8 @@ jobs:
                 echo "Created new PR in $REPO: $PR_URL"
               fi
               
-              # Add to our tracking arrays
-              PR_URLS+=("$PR_URL")
-              PR_NUMBERS+=("$PR_NUMBER")
-              REPO_NAMES+=("$REPO")
+              # Save PR data in a format we can parse later
+              PR_DATA+=("$REPO:$PR_NUMBER:$PR_URL")
             else
               echo "Failed to merge $CURRENT_REPO/dev into $REPO/dev"
               exit 1
@@ -130,42 +123,47 @@ jobs:
             rm -rf downstream_repo
           done
 
-          # Save the PR URLs, numbers and repo names as outputs
-          echo "downstream_prs=$(IFS=,; echo "${PR_URLS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
+          # Save the PR data to a file that can be passed to the next job
+          echo "${PR_DATA[*]}" > pr_data.txt
 
-          # Format PR numbers and repo names as arrays with proper quoting
-          PR_NUMBERS_JSON=$(printf '%s\n' "${PR_NUMBERS[@]}" | jq -R . | jq -s .)
-          REPO_NAMES_JSON=$(printf '%s\n' "${REPO_NAMES[@]}" | jq -R . | jq -s .)
+          # Debug output
+          echo "Created/updated PRs: ${PR_DATA[*]}"
 
-          echo "downstream_pr_numbers=$PR_NUMBERS_JSON" >> $GITHUB_OUTPUT
-          echo "downstream_repo_names=$REPO_NAMES_JSON" >> $GITHUB_OUTPUT
+      - name: Upload PR data
+        uses: actions/upload-artifact@v3
+        with:
+          name: pr-data
+          path: pr_data.txt
 
   check-downstream-prs:
-    needs: [stage-downstream]
+    needs: stage-downstream
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for PR checks (30s)
-        run: sleep 30
+      - name: Download PR data
+        uses: actions/download-artifact@v3
+        with:
+          name: pr-data
+
+      - name: Wait for PR checks (60s)
+        run: sleep 60
 
       - name: Check downstream pull request status
         run: |
-          PR_NUMBERS='${{ needs.stage-downstream.outputs.downstream_pr_numbers }}'
-          REPO_NAMES='${{ needs.stage-downstream.outputs.downstream_repo_names }}'
+          # Read PR data from file
+          PR_DATA=$(cat pr_data.txt)
 
-          # Parse the JSON arrays
-          readarray -t PR_ARRAY < <(echo "$PR_NUMBERS" | jq -r '.[]')
-          readarray -t REPO_ARRAY < <(echo "$REPO_NAMES" | jq -r '.[]')
+          echo "PR Data: $PR_DATA"
 
-          echo "Found ${#PR_ARRAY[@]} pull requests to check"
-
-          if [ ${#PR_ARRAY[@]} -eq 0 ] || [ ${#REPO_ARRAY[@]} -eq 0 ]; then
-            echo "::error::No pull requests or repositories found to check"
+          # Parse PR data
+          if [[ -z "$PR_DATA" ]]; then
+            echo "::error::No pull requests found to check"
             exit 1
           fi
 
-          for i in "${!PR_ARRAY[@]}"; do
-            PR_NUMBER=${PR_ARRAY[$i]}
-            REPO=${REPO_ARRAY[$i]}
+          # Loop through each PR entry
+          for PR_ENTRY in $PR_DATA; do
+            # Split by colon
+            IFS=':' read -r REPO PR_NUMBER PR_URL <<< "$PR_ENTRY"
             
             echo "Checking status of PR #$PR_NUMBER in repository $REPO"
             
