@@ -67,37 +67,63 @@ jobs:
           # Save both stdout and stderr to files
           python -m pytest -q --json-report --json-report-file=pr_results.json > pr_stdout.txt 2> pr_stderr.txt || true
 
-          # Debug output
-          echo "Test run complete. Stdout:"
-          cat pr_stdout.txt
-          echo "Stderr:"
-          cat pr_stderr.txt
+          # Dump stderr to a file for debugging
+          cat pr_stderr.txt > error_log.txt
+          echo "======== ERROR LOG CONTENT ========" >> $GITHUB_STEP_SUMMARY
+          cat error_log.txt >> $GITHUB_STEP_SUMMARY
+          echo "==================================" >> $GITHUB_STEP_SUMMARY
 
-          # Check for collection errors - improved pattern matching
-          if grep -q "Interrupted:.* error during collection" pr_stderr.txt || grep -q "ERROR collecting" pr_stderr.txt; then
+          # Much more aggressive pattern matching for collection errors
+          if cat pr_stderr.txt | grep -q "ERROR collecting" || 
+             cat pr_stderr.txt | grep -q "Interrupted.*error during collection" || 
+             cat pr_stderr.txt | grep -q "ImportError" ||
+             cat pr_stderr.txt | grep -q "!!!.*Interrupted.*!!!" ||
+             cat pr_stderr.txt | grep -q "^ERROR " ||
+             ! [ -s pr_results.json ] ||
+             [ $(jq '.summary.total' pr_results.json 2>/dev/null || echo "0") = "0" ]; then
             echo "Collection errors found in PR branch!"
             echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            # Extract the error details
+            
+            # Create a comprehensive error log with context
+            echo "=== Detected Test Collection Errors ===" > pr_errors.txt
+            
+            # Extract import errors (most common)
+            if grep -q "ImportError" pr_stderr.txt; then
+              echo "Import Error Details:" >> pr_errors.txt
+              grep -A 15 -B 3 "ImportError" pr_stderr.txt >> pr_errors.txt
+            fi
+            
+            # Extract standard collection errors
             if grep -q "ERROR collecting" pr_stderr.txt; then
-              # Extract import error details
-              grep -A 10 "ERROR collecting" pr_stderr.txt > pr_errors.txt
-            else
-              # Extract the standard collection error message
-              grep -A 2 "Interrupted:" pr_stderr.txt > pr_errors.txt
+              echo "Collection Error Details:" >> pr_errors.txt
+              grep -A 15 -B 3 "ERROR collecting" pr_stderr.txt >> pr_errors.txt
+            fi
+            
+            # Extract the error summary line with exclamation marks
+            if grep -q "!!!" pr_stderr.txt; then
+              echo "Error Summary:" >> pr_errors.txt
+              grep "!!!" pr_stderr.txt >> pr_errors.txt
+            fi
+            
+            # If nothing specific was captured, include the whole stderr
+            if [ ! -s pr_errors.txt ]; then
+              echo "Full Error Log:" >> pr_errors.txt
+              cat pr_stderr.txt >> pr_errors.txt
             fi
           else
             echo "No collection errors found in PR branch"
             echo "has_collection_errors=false" >> $GITHUB_OUTPUT
           fi
 
-          # Check if JSON report was created
-          if [ ! -f pr_results.json ]; then
-            echo "::warning::No test results JSON file was created!"
+          # Check if JSON report was created and contains valid data
+          if [ ! -f pr_results.json ] || [ $(jq '.summary.total' pr_results.json 2>/dev/null || echo "0") = "0" ]; then
+            echo "::warning::No valid test results JSON file was created!"
             echo '{"summary": {"total": 0, "passed": 0}}' > pr_results.json
+            
             # Only set collection errors if we didn't already find them
             if [ "$(cat $GITHUB_OUTPUT | grep -c 'has_collection_errors')" -eq 0 ]; then
               echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-              echo "No tests were executed - JSON report was not created" > pr_errors.txt
+              echo "No tests were executed - JSON report was not created or invalid" > pr_errors.txt
             fi
           fi
 
@@ -120,26 +146,43 @@ jobs:
               if os.path.exists('pr_errors.txt'):
                   with open('pr_errors.txt', 'r') as f:
                       error_text = f.read()
+                      # Try to extract the most relevant error message
                       # First try to extract the import error message
-                      error_match = re.search(r'ImportError: (.+)', error_text)
-                      if error_match:
-                          error_message = f'Import error: {error_match.group(1)}'
+                      import_error_match = re.search(r'ImportError: (.+)', error_text)
+                      if import_error_match:
+                          error_message = f'Import error: {import_error_match.group(1)}'
                       else:
-                          # Fall back to checking for the interrupted pattern
-                          error_match = re.search(r'(Interrupted:.* error during collection)', error_text)
+                          # Try to extract ERROR collecting message
+                          error_match = re.search(r'ERROR collecting (.+?)\\n', error_text)
                           if error_match:
-                              error_message = error_match.group(1)
+                              error_message = f'Collection error in {error_match.group(1)}'
                           else:
-                              error_message = 'Collection errors found in tests'
+                              # Try to extract the Interrupted line
+                              interrupted_match = re.search(r'(Interrupted:.* error during collection)', error_text)
+                              if interrupted_match:
+                                  error_message = interrupted_match.group(1)
+                              else:
+                                  # Just use the first non-empty line
+                                  lines = [line.strip() for line in error_text.split('\\n') if line.strip()]
+                                  if lines:
+                                      error_message = lines[0][:200]  # Limit to 200 chars
+                                  else:
+                                      error_message = 'Collection errors found in tests'
 
           # Parse test results
-          with open('pr_results.json') as f:
-              pr_results = json.load(f)
+          try:
+              with open('pr_results.json') as f:
+                  pr_results = json.load(f)
+              
+              # Handle missing keys with default values
+              summary = pr_results.get('summary', {})
+              pr_total = summary.get('total', 0)
+              pr_passed = summary.get('passed', 0)
+          except (json.JSONDecodeError, FileNotFoundError):
+              print('Error parsing JSON results file, using defaults')
+              pr_total = 0
+              pr_passed = 0
 
-          # Handle missing keys with default values
-          summary = pr_results.get('summary', {})
-          pr_total = summary.get('total', 0)
-          pr_passed = summary.get('passed', 0)
           pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
 
           print(f'Total tests: {pr_total}')
@@ -167,6 +210,7 @@ jobs:
           path: |
             pr_errors.txt
             pr_stderr.txt
+            error_log.txt
           retention-days: 5
 
   test-main-branch:
@@ -234,37 +278,63 @@ jobs:
           # Save both stdout and stderr to files
           python -m pytest -q --json-report --json-report-file=main_results.json > main_stdout.txt 2> main_stderr.txt || true
 
-          # Debug output
-          echo "Test run complete. Stdout:"
-          cat main_stdout.txt
-          echo "Stderr:"
-          cat main_stderr.txt
+          # Dump stderr to a file for debugging
+          cat main_stderr.txt > error_log.txt
+          echo "======== ERROR LOG CONTENT ========" >> $GITHUB_STEP_SUMMARY
+          cat error_log.txt >> $GITHUB_STEP_SUMMARY
+          echo "==================================" >> $GITHUB_STEP_SUMMARY
 
-          # Check for collection errors - improved pattern matching
-          if grep -q "Interrupted:.* error during collection" main_stderr.txt || grep -q "ERROR collecting" main_stderr.txt; then
+          # Much more aggressive pattern matching for collection errors
+          if cat main_stderr.txt | grep -q "ERROR collecting" || 
+             cat main_stderr.txt | grep -q "Interrupted.*error during collection" || 
+             cat main_stderr.txt | grep -q "ImportError" ||
+             cat main_stderr.txt | grep -q "!!!.*Interrupted.*!!!" ||
+             cat main_stderr.txt | grep -q "^ERROR " ||
+             ! [ -s main_results.json ] ||
+             [ $(jq '.summary.total' main_results.json 2>/dev/null || echo "0") = "0" ]; then
             echo "Collection errors found in main branch!"
             echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            # Extract the error details
+            
+            # Create a comprehensive error log with context
+            echo "=== Detected Test Collection Errors ===" > main_errors.txt
+            
+            # Extract import errors (most common)
+            if grep -q "ImportError" main_stderr.txt; then
+              echo "Import Error Details:" >> main_errors.txt
+              grep -A 15 -B 3 "ImportError" main_stderr.txt >> main_errors.txt
+            fi
+            
+            # Extract standard collection errors
             if grep -q "ERROR collecting" main_stderr.txt; then
-              # Extract import error details
-              grep -A 10 "ERROR collecting" main_stderr.txt > main_errors.txt
-            else
-              # Extract the standard collection error message
-              grep -A 2 "Interrupted:" main_stderr.txt > main_errors.txt
+              echo "Collection Error Details:" >> main_errors.txt
+              grep -A 15 -B 3 "ERROR collecting" main_stderr.txt >> main_errors.txt
+            fi
+            
+            # Extract the error summary line with exclamation marks
+            if grep -q "!!!" main_stderr.txt; then
+              echo "Error Summary:" >> main_errors.txt
+              grep "!!!" main_stderr.txt >> main_errors.txt
+            fi
+            
+            # If nothing specific was captured, include the whole stderr
+            if [ ! -s main_errors.txt ]; then
+              echo "Full Error Log:" >> main_errors.txt
+              cat main_stderr.txt >> main_errors.txt
             fi
           else
             echo "No collection errors found in main branch"
             echo "has_collection_errors=false" >> $GITHUB_OUTPUT
           fi
 
-          # Check if JSON report was created
-          if [ ! -f main_results.json ]; then
-            echo "::warning::No test results JSON file was created!"
+          # Check if JSON report was created and contains valid data
+          if [ ! -f main_results.json ] || [ $(jq '.summary.total' main_results.json 2>/dev/null || echo "0") = "0" ]; then
+            echo "::warning::No valid test results JSON file was created!"
             echo '{"summary": {"total": 0, "passed": 0}}' > main_results.json
+            
             # Only set collection errors if we didn't already find them
             if [ "$(cat $GITHUB_OUTPUT | grep -c 'has_collection_errors')" -eq 0 ]; then
               echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-              echo "No tests were executed - JSON report was not created" > main_errors.txt
+              echo "No tests were executed - JSON report was not created or invalid" > main_errors.txt
             fi
           fi
 
@@ -286,26 +356,43 @@ jobs:
               if os.path.exists('main_errors.txt'):
                   with open('main_errors.txt', 'r') as f:
                       error_text = f.read()
+                      # Try to extract the most relevant error message
                       # First try to extract the import error message
-                      error_match = re.search(r'ImportError: (.+)', error_text)
-                      if error_match:
-                          error_message = f'Import error: {error_match.group(1)}'
+                      import_error_match = re.search(r'ImportError: (.+)', error_text)
+                      if import_error_match:
+                          error_message = f'Import error: {import_error_match.group(1)}'
                       else:
-                          # Fall back to checking for the interrupted pattern
-                          error_match = re.search(r'(Interrupted:.* error during collection)', error_text)
+                          # Try to extract ERROR collecting message
+                          error_match = re.search(r'ERROR collecting (.+?)\\n', error_text)
                           if error_match:
-                              error_message = error_match.group(1)
+                              error_message = f'Collection error in {error_match.group(1)}'
                           else:
-                              error_message = 'Collection errors found in tests'
+                              # Try to extract the Interrupted line
+                              interrupted_match = re.search(r'(Interrupted:.* error during collection)', error_text)
+                              if interrupted_match:
+                                  error_message = interrupted_match.group(1)
+                              else:
+                                  # Just use the first non-empty line
+                                  lines = [line.strip() for line in error_text.split('\\n') if line.strip()]
+                                  if lines:
+                                      error_message = lines[0][:200]  # Limit to 200 chars
+                                  else:
+                                      error_message = 'Collection errors found in tests'
 
           # Parse test results
-          with open('main_results.json') as f:
-              main_results = json.load(f)
+          try:
+              with open('main_results.json') as f:
+                  main_results = json.load(f)
+              
+              # Handle missing keys with default values
+              summary = main_results.get('summary', {})
+              main_total = summary.get('total', 0)
+              main_passed = summary.get('passed', 0)
+          except (json.JSONDecodeError, FileNotFoundError):
+              print('Error parsing JSON results file, using defaults')
+              main_total = 0
+              main_passed = 0
 
-          # Handle missing keys with default values
-          summary = main_results.get('summary', {})
-          main_total = summary.get('total', 0)
-          main_passed = summary.get('passed', 0)
           main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
 
           print(f'Total tests: {main_total}')
@@ -333,6 +420,7 @@ jobs:
           path: |
             main_errors.txt
             main_stderr.txt
+            error_log.txt
           retention-days: 5
 
   compare-results:
