@@ -1,4 +1,4 @@
-name: Compare Pytest Results
+name: Compare Pytest Results Between Branches
 
 on:
   workflow_call:
@@ -9,7 +9,7 @@ jobs:
   lint:
     uses: ./.github/workflows/test-lint.yml
 
-  test-pr-branch:
+  test-source-branch:
     needs: lint
     runs-on: ubuntu-latest
     outputs:
@@ -252,7 +252,7 @@ jobs:
           cat $GITHUB_OUTPUT
           echo "PR branch test results processed: ${{ steps.extract-results.outputs.passed }}/${{ steps.extract-results.outputs.total }} tests passed (${{ steps.extract-results.outputs.percentage }}%)"
 
-  test-main-branch:
+  test-target-branch:
     needs: lint
     runs-on: ubuntu-latest
     outputs:
@@ -266,10 +266,10 @@ jobs:
       error_details: ${{ steps.check-collection.outputs.error_details }}
 
     steps:
-      - name: Checkout main branch
+      - name: Checkout target branch
         uses: actions/checkout@v4.2.2
         with:
-          ref: main
+          ref: ${{ github.base_ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5.3.0
@@ -319,7 +319,7 @@ jobs:
           echo "::debug::Checking for collection errors"
           if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
             echo "::debug::Collection errors detected, extracting details"
-            echo "::warning::Test discovery errors detected in main branch - Python modules could not be imported correctly"
+            echo "::warning::Test discovery errors detected in target branch - Python modules could not be imported correctly"
             
             # Attempt to identify specific error type
             if grep -q "ImportError" collection_output.txt; then
@@ -337,7 +337,7 @@ jobs:
             fi
             
             echo "::debug::Error type identified: $ERROR_TYPE"
-            echo "Main branch discovery error type: $ERROR_TYPE"
+            echo "Target branch discovery error type: $ERROR_TYPE"
             
             echo "::debug::Attempting to find specific error file"
             ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
@@ -355,25 +355,25 @@ jobs:
               ERROR_DETAILS=$(cat error_details.txt | tr '\n' ' ' | sed 's/"/\\"/g')
             fi
             
-            echo "::warning::Main branch discovery error details: ${ERROR_DETAILS:0:200}..."
+            echo "::warning::Target branch discovery error details: ${ERROR_DETAILS:0:200}..."
             echo "::debug::Setting has_collection_errors=true in GitHub output"
             HAS_COLLECTION_ERRORS="true"
           else
             echo "::debug::No collection errors detected, checking test count"
-            echo "No discovery errors detected in main branch"
+            echo "No discovery errors detected in target branch"
             
             echo "::debug::Extracting test count from collection output"
             TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
             echo "::debug::Test count extraction result: $TEST_COUNT"
             
             if [[ "$TEST_COUNT" == "0" ]]; then
-              echo "::warning::No tests were found in the main branch"
+              echo "::warning::No tests were found in the target branch"
               echo "::debug::Setting no_tests_found=true"
               NO_TESTS_FOUND="true"
               ERROR_TYPE="NoTestsFound"
-              ERROR_DETAILS="No test files were discovered in main branch that match pytest's test discovery pattern"
+              ERROR_DETAILS="No test files were discovered in target branch that match pytest's test discovery pattern"
             else  
-              echo "Found $TEST_COUNT tests in main branch"
+              echo "Found $TEST_COUNT tests in target branch"
             fi
           fi
 
@@ -393,7 +393,7 @@ jobs:
           echo "::debug::Full collection output for debugging:"
           cat collection_output.txt
 
-      - name: Run tests on main branch
+      - name: Run tests on target branch
         if: steps.check-collection.outputs.has_collection_errors != 'true'
         run: |
           set -x
@@ -402,18 +402,18 @@ jobs:
           find . -name "test_*.py" -o -name "*_test.py" | sort
 
           echo "::debug::Running pytest with json report"
-          echo "Running tests on main branch..."
-          python -m pytest -vv --json-report --json-report-file=main_results.json || true
+          echo "Running tests on target branch..."
+          python -m pytest -vv --json-report --json-report-file=target_results.json || true
 
           echo "::debug::Test run completed, checking if json results file exists"
-          if [ -f main_results.json ]; then
-            echo "::debug::JSON results file size: $(wc -c main_results.json)"
+          if [ -f target_results.json ]; then
+            echo "::debug::JSON results file size: $(wc -c target_results.json)"
             echo "::debug::JSON results file first 200 characters:"
-            head -c 200 main_results.json
-            echo "Test results file successfully created for main branch"
+            head -c 200 target_results.json
+            echo "Test results file successfully created for target branch"
           else
-            echo "::debug::WARNING: main_results.json file was not created"
-            echo "::warning::Failed to create test results file for main branch"
+            echo "::debug::WARNING: target_results.json file was not created"
+            echo "::warning::Failed to create test results file for target branch"
           fi
 
       - name: Extract test results
@@ -421,82 +421,82 @@ jobs:
         run: |
           set -x
           echo "::debug::Running Python script to extract test results"
-          echo "Processing test results for main branch"
+          echo "Processing test results for target branch: ${{ github.base_ref }}"
 
           python -c "
           import json
           import sys
           import os
 
-          print('Debug: Starting test results extraction script for main branch')
+          print('Debug: Starting test results extraction script for target branch')
 
           # Default values in case file doesn't exist or is invalid
-          main_total = 0
-          main_passed = 0
-          main_percentage = 0
+          target_total = 0
+          target_passed = 0
+          target_percentage = 0
 
           try:
-              print('Debug: Attempting to open main_results.json')
-              with open('main_results.json') as f:
+              print('Debug: Attempting to open target_results.json')
+              with open('target_results.json') as f:
                   print('Debug: File opened successfully')
-                  main_results = json.load(f)
-                  print(f'Debug: JSON loaded successfully, keys: {list(main_results.keys())}')
-                  print(f'Debug: Summary key structure: {main_results[\"summary\"] if \"summary\" in main_results else \"No summary key\"}')
+                  target_results = json.load(f)
+                  print(f'Debug: JSON loaded successfully, keys: {list(target_results.keys())}')
+                  print(f'Debug: Summary key structure: {target_results[\"summary\"] if \"summary\" in target_results else \"No summary key\"}')
               
               # Check for collection errors by looking at exitcode or error patterns
-              if main_results.get('exitcode', 0) > 1:
+              if target_results.get('exitcode', 0) > 1:
                   print('Debug: Detected non-zero exitcode, likely a collection error')
                   # Let's see if we can extract the error message
-                  if 'collectors' in main_results and main_results['collectors']:
-                      print(f'Debug: Collection errors found: {main_results[\"collectors\"]}')
-                  main_total = 0  # Explicitly set to 0 - no tests run when collection fails
-                  main_passed = 0
-              elif 'summary' in main_results and isinstance(main_results['summary'], dict):
+                  if 'collectors' in target_results and target_results['collectors']:
+                      print(f'Debug: Collection errors found: {target_results[\"collectors\"]}')
+                  target_total = 0  # Explicitly set to 0 - no tests run when collection fails
+                  target_passed = 0
+              elif 'summary' in target_results and isinstance(target_results['summary'], dict):
                   # Normal case - extract data from summary
-                  summary = main_results['summary']
-                  main_total = summary.get('total', 0)
-                  main_passed = summary.get('passed', 0)
-                  print(f'Debug: Results extracted from summary - Total: {main_total}, Passed: {main_passed}')
+                  summary = target_results['summary']
+                  target_total = summary.get('total', 0)
+                  target_passed = summary.get('passed', 0)
+                  print(f'Debug: Results extracted from summary - Total: {target_total}, Passed: {target_passed}')
               else:
                   print('Debug: No valid summary structure found')
               
               # Calculate percentage safely
-              main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
-              print(f'Debug: Pass percentage calculated: {main_percentage:.2f}%')
+              target_percentage = (target_passed / target_total * 100) if target_total > 0 else 0
+              print(f'Debug: Pass percentage calculated: {target_percentage:.2f}%')
               
           except FileNotFoundError as e:
               print(f'Debug: File not found error: {e}')
           except KeyError as e:
               print(f'Debug: Missing key in results file: {e}')
-              if 'main_results' in locals():
-                  print(f'Debug: Available keys: {list(main_results.keys())}')
-                  if 'summary' in main_results:
-                      print(f'Debug: Summary structure: {main_results[\"summary\"]}')
+              if 'target_results' in locals():
+                  print(f'Debug: Available keys: {list(target_results.keys())}')
+                  if 'summary' in target_results:
+                      print(f'Debug: Summary structure: {target_results[\"summary\"]}')
           except Exception as e:
               print(f'Debug: Error processing results: {e}')
               import traceback
               print(f'Debug: Full exception: {traceback.format_exc()}')
 
-          print(f'Total tests: {main_total}')
-          print(f'Passed tests: {main_passed}')
-          print(f'Pass percentage: {main_percentage:.2f}%')
+          print(f'Total tests: {target_total}')
+          print(f'Passed tests: {target_passed}')
+          print(f'Pass percentage: {target_percentage:.2f}%')
 
           # Set outputs for GitHub Actions
           print('Debug: Writing results to GITHUB_OUTPUT')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'total={main_total}\\n')
-              f.write(f'passed={main_passed}\\n')
-              f.write(f'percentage={main_percentage:.2f}\\n')
+              f.write(f'total={target_total}\\n')
+              f.write(f'passed={target_passed}\\n')
+              f.write(f'percentage={target_percentage:.2f}\\n')
 
           print('Debug: Results extraction completed')
           "
 
           echo "::debug::GITHUB_OUTPUT file content:"
           cat $GITHUB_OUTPUT
-          echo "Main branch test results processed: ${{ steps.extract-results.outputs.passed }}/${{ steps.extract-results.outputs.total }} tests passed (${{ steps.extract-results.outputs.percentage }}%)"
+          echo "Target branch test results processed: ${{ steps.extract-results.outputs.passed }}/${{ steps.extract-results.outputs.total }} tests passed (${{ steps.extract-results.outputs.percentage }}%)"
 
   compare-results:
-    needs: [test-pr-branch, test-main-branch]
+    needs: [test-source-branch, test-target-branch]
     runs-on: ubuntu-latest
 
     steps:
@@ -511,16 +511,16 @@ jobs:
         run: |
           set -x
           echo "::debug::Retrieving collection error status information"
-          PR_COLLECTION_ERRORS="${{ needs.test-pr-branch.outputs.collection_errors }}"
-          PR_NO_TESTS="${{ needs.test-pr-branch.outputs.no_tests_found }}"
-          PR_ERROR_TYPE="${{ needs.test-pr-branch.outputs.error_type }}"
-          PR_ERROR_DETAILS="${{ needs.test-pr-branch.outputs.error_details }}"
-          MAIN_COLLECTION_ERRORS="${{ needs.test-main-branch.outputs.collection_errors }}"
+          PR_COLLECTION_ERRORS="${{ needs.test-source-branch.outputs.collection_errors }}"
+          PR_NO_TESTS="${{ needs.test-source-branch.outputs.no_tests_found }}"
+          PR_ERROR_TYPE="${{ needs.test-source-branch.outputs.error_type }}"
+          PR_ERROR_DETAILS="${{ needs.test-source-branch.outputs.error_details }}"
+          TARGET_COLLECTION_ERRORS="${{ needs.test-target-branch.outputs.collection_errors }}"
 
           echo "::debug::PR branch collection errors: $PR_COLLECTION_ERRORS"
           echo "::debug::PR branch no tests found: $PR_NO_TESTS"
           echo "::debug::PR branch error type: $PR_ERROR_TYPE"
-          echo "::debug::Main branch collection errors: $MAIN_COLLECTION_ERRORS"
+          echo "::debug::Target branch collection errors: $TARGET_COLLECTION_ERRORS"
 
           # Distinct error handling for PR branch
           if [[ "$PR_COLLECTION_ERRORS" == "true" ]]; then
@@ -538,15 +538,15 @@ jobs:
             exit 1
           fi
 
-          # Warning for main branch issues (not a failure)
-          if [[ "$MAIN_COLLECTION_ERRORS" == "true" ]]; then
-            echo "::debug::Main branch has discovery errors, displaying warning"
-            echo "⚠️ Main branch has test discovery errors. Tests will still be compared but results may not be accurate."
+          # Warning for target branch issues (not a failure)
+          if [[ "$TARGET_COLLECTION_ERRORS" == "true" ]]; then
+            echo "::debug::Target branch has discovery errors, displaying warning"
+            echo "⚠️ Target branch has test discovery errors. Tests will still be compared but results may not be accurate."
           fi
 
-          if [[ "${{ needs.test-main-branch.outputs.no_tests_found }}" == "true" ]]; then
-            echo "::debug::Main branch has no tests, displaying warning"
-            echo "⚠️ Main branch has no tests detected. PR branch tests will still be evaluated."
+          if [[ "${{ needs.test-target-branch.outputs.no_tests_found }}" == "true" ]]; then
+            echo "::debug::Target branch has no tests, displaying warning"
+            echo "⚠️ Target branch has no tests detected. PR branch tests will still be evaluated."
           fi
 
       - name: Compare test results
@@ -555,19 +555,19 @@ jobs:
           echo "::debug::Starting detailed test results comparison"
 
           # Print all input values for debugging
-          echo "::debug::Main branch total: ${{ needs.test-main-branch.outputs.total }}"
-          echo "::debug::Main branch passed: ${{ needs.test-main-branch.outputs.passed }}"
-          echo "::debug::Main branch percentage: ${{ needs.test-main-branch.outputs.percentage }}"
-          echo "::debug::PR branch total: ${{ needs.test-pr-branch.outputs.total }}"
-          echo "::debug::PR branch passed: ${{ needs.test-pr-branch.outputs.passed }}"
-          echo "::debug::PR branch percentage: ${{ needs.test-pr-branch.outputs.percentage }}"
+          echo "::debug::Target branch total: ${{ needs.test-target-branch.outputs.total }}"
+          echo "::debug::Target branch passed: ${{ needs.test-target-branch.outputs.passed }}"
+          echo "::debug::Target branch percentage: ${{ needs.test-target-branch.outputs.percentage }}"
+          echo "::debug::PR branch total: ${{ needs.test-source-branch.outputs.total }}"
+          echo "::debug::PR branch passed: ${{ needs.test-source-branch.outputs.passed }}"
+          echo "::debug::PR branch percentage: ${{ needs.test-source-branch.outputs.percentage }}"
 
           echo "Test Results Summary:"
-          echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
-          echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
+          echo "Target branch (${{ github.base_ref }}): ${{ needs.test-target-branch.outputs.passed }}/${{ needs.test-target-branch.outputs.total }} tests passed (${{ needs.test-target-branch.outputs.percentage }}%)"
+          echo "PR branch: ${{ needs.test-source-branch.outputs.passed }}/${{ needs.test-source-branch.outputs.total }} tests passed (${{ needs.test-source-branch.outputs.percentage }}%)"
 
           echo "::debug::Checking if PR branch has tests"
-          if [[ "${{ needs.test-pr-branch.outputs.total }}" == "0" ]]; then
+          if [[ "${{ needs.test-source-branch.outputs.total }}" == "0" ]]; then
             echo "::debug::PR branch has no tests, failing workflow"
             echo "::error::No tests were found in the PR branch"
             echo "❌ PR branch has no tests detected. Please add test files that match pytest's discovery pattern."
@@ -575,25 +575,25 @@ jobs:
           fi
 
           echo "::debug::Converting string outputs to variables for comparison"
-          PR_PASSED=${{ needs.test-pr-branch.outputs.passed }}
-          MAIN_PASSED=${{ needs.test-main-branch.outputs.passed }}
-          PR_PERCENTAGE=${{ needs.test-pr-branch.outputs.percentage }}
-          MAIN_PERCENTAGE=${{ needs.test-main-branch.outputs.percentage }}
-          PR_TOTAL=${{ needs.test-pr-branch.outputs.total }}
-          MAIN_TOTAL=${{ needs.test-main-branch.outputs.total }}
+          PR_PASSED=${{ needs.test-source-branch.outputs.passed }}
+          TARGET_PASSED=${{ needs.test-target-branch.outputs.passed }}
+          PR_PERCENTAGE=${{ needs.test-source-branch.outputs.percentage }}
+          TARGET_PERCENTAGE=${{ needs.test-target-branch.outputs.percentage }}
+          PR_TOTAL=${{ needs.test-source-branch.outputs.total }}
+          TARGET_TOTAL=${{ needs.test-target-branch.outputs.total }}
 
           echo "::debug::PR_PASSED=$PR_PASSED"
-          echo "::debug::MAIN_PASSED=$MAIN_PASSED"
+          echo "::debug::TARGET_PASSED=$TARGET_PASSED"
           echo "::debug::PR_PERCENTAGE=$PR_PERCENTAGE"
-          echo "::debug::MAIN_PERCENTAGE=$MAIN_PERCENTAGE"
+          echo "::debug::TARGET_PERCENTAGE=$TARGET_PERCENTAGE"
           echo "::debug::PR_TOTAL=$PR_TOTAL"
-          echo "::debug::MAIN_TOTAL=$MAIN_TOTAL"
+          echo "::debug::TARGET_TOTAL=$TARGET_TOTAL"
 
-          # Handle case where main has no tests
-          if [[ "$MAIN_TOTAL" == "0" ]]; then
-            echo "::debug::Main branch has no tests, checking PR branch tests only"
+          # Handle case where target has no tests
+          if [[ "$TARGET_TOTAL" == "0" ]]; then
+            echo "::debug::Target branch has no tests, checking PR branch tests only"
             if [[ "$PR_PASSED" -gt 0 ]]; then
-              echo "✅ PR branch has tests and some are passing (main branch has no tests)"
+              echo "✅ PR branch has tests and some are passing (target branch has no tests)"
               exit 0
             else
               echo "❌ PR branch has no passing tests"
@@ -603,40 +603,40 @@ jobs:
           fi
 
           echo "::debug::Performing comparison with bc"
-          echo "::debug::Comparing passed tests: $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l)"
-          echo "::debug::Comparing pass percentage: $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l)"
+          echo "::debug::Comparing passed tests: $(echo "$PR_PASSED >= $TARGET_PASSED" | bc -l)"
+          echo "::debug::Comparing pass percentage: $(echo "$PR_PERCENTAGE >= $TARGET_PERCENTAGE" | bc -l)"
 
-          if (( $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l) )); then
+          if (( $(echo "$PR_PASSED >= $TARGET_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $TARGET_PERCENTAGE" | bc -l) )); then
             echo "::debug::PR branch has equal or better results"
-            echo "✅ PR branch has equal or better test results than main branch"
+            echo "✅ PR branch has equal or better test results than target branch"
             
             # Additional verbose information about improvement
-            if (( $(echo "$PR_PASSED > $MAIN_PASSED" | bc -l) )); then
-              IMPROVEMENT=$(( $PR_PASSED - $MAIN_PASSED ))
-              echo "  - Improvement: $IMPROVEMENT more passing tests than main branch"
+            if (( $(echo "$PR_PASSED > $TARGET_PASSED" | bc -l) )); then
+              IMPROVEMENT=$(( $PR_PASSED - $TARGET_PASSED ))
+              echo "  - Improvement: $IMPROVEMENT more passing tests than target branch"
             fi
             
-            if (( $(echo "$PR_PERCENTAGE > $MAIN_PERCENTAGE" | bc -l) )); then
-              PERCENTAGE_IMPROVEMENT=$(echo "$PR_PERCENTAGE - $MAIN_PERCENTAGE" | bc -l)
-              echo "  - Percentage improvement: +${PERCENTAGE_IMPROVEMENT}% compared to main branch"
+            if (( $(echo "$PR_PERCENTAGE > $TARGET_PERCENTAGE" | bc -l) )); then
+              PERCENTAGE_IMPROVEMENT=$(echo "$PR_PERCENTAGE - $TARGET_PERCENTAGE" | bc -l)
+              echo "  - Percentage improvement: +${PERCENTAGE_IMPROVEMENT}% compared to target branch"
             fi
             
             exit 0
           else
             echo "::debug::PR branch has worse results"
-            echo "❌ PR branch has worse test results than main branch"
-            echo "  - Passed tests: $PR_PASSED vs $MAIN_PASSED on main"
-            echo "  - Pass percentage: $PR_PERCENTAGE% vs $MAIN_PERCENTAGE% on main"
+            echo "❌ PR branch has worse test results than target branch"
+            echo "  - Passed tests: $PR_PASSED vs $TARGET_PASSED on target branch"
+            echo "  - Pass percentage: $PR_PERCENTAGE% vs $TARGET_PERCENTAGE% on target branch"
             
             # Calculate regression metrics
-            if (( $(echo "$PR_PASSED < $MAIN_PASSED" | bc -l) )); then
-              REGRESSION=$(( $MAIN_PASSED - $PR_PASSED ))
-              echo "  - Regression: $REGRESSION fewer passing tests than main branch"
+            if (( $(echo "$PR_PASSED < $TARGET_PASSED" | bc -l) )); then
+              REGRESSION=$(( $TARGET_PASSED - $PR_PASSED ))
+              echo "  - Regression: $REGRESSION fewer passing tests than target branch"
             fi
             
-            if (( $(echo "$PR_PERCENTAGE < $MAIN_PERCENTAGE" | bc -l) )); then
-              PERCENTAGE_REGRESSION=$(echo "$MAIN_PERCENTAGE - $PR_PERCENTAGE" | bc -l)
-              echo "  - Percentage regression: -${PERCENTAGE_REGRESSION}% compared to main branch"
+            if (( $(echo "$PR_PERCENTAGE < $TARGET_PERCENTAGE" | bc -l) )); then
+              PERCENTAGE_REGRESSION=$(echo "$TARGET_PERCENTAGE - $PR_PERCENTAGE" | bc -l)
+              echo "  - Percentage regression: -${PERCENTAGE_REGRESSION}% compared to target branch"
             fi
             
             exit 1
