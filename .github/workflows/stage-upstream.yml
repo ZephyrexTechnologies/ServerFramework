@@ -1,4 +1,4 @@
-name: Stage Upstream Repositories
+name: Stage Downstream Repositories
 
 on:
   pull_request:
@@ -23,12 +23,12 @@ jobs:
             echo "is_from_dev=false" >> $GITHUB_OUTPUT
           fi
 
-  stage-upstream:
+  stage-downstream:
     needs: validate-pr-source
     if: needs.validate-pr-source.outputs.is_from_dev == 'true'
     runs-on: ubuntu-latest
     outputs:
-      upstream_prs: ${{ steps.create_prs.outputs.upstream_prs }}
+      downstream_prs: ${{ steps.create_prs.outputs.downstream_prs }}
     permissions:
       contents: write
       pull-requests: write
@@ -45,12 +45,12 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
-      - name: Parse upstream repositories
+      - name: Parse downstream repositories
         id: parse_repos
         run: |
           echo "REPOS=$(echo ${{ secrets.DOWNSTREAM_REPOSITORIES }} | tr ',' ' ')" >> $GITHUB_ENV
 
-      - name: Create upstream pull requests
+      - name: Create downstream pull requests
         id: create_prs
         run: |
           PR_URLS=()
@@ -58,13 +58,13 @@ jobs:
           REPO_NAMES=()
 
           for REPO in $REPOS; do
-            echo "Processing upstream repository: $REPO"
+            echo "Processing downstream repository: $REPO"
             
-            # Clone the upstream repository
-            git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$REPO.git upstream_repo
-            cd upstream_repo
+            # Clone the downstream repository using PAT_TOKEN
+            git clone https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/$REPO.git downstream_repo
+            cd downstream_repo
             
-            # Check if dev branch exists in upstream repository
+            # Check if dev branch exists in downstream repository
             if git ls-remote --heads origin dev | grep -q dev; then
               git checkout dev
             else
@@ -76,20 +76,20 @@ jobs:
             CURRENT_REPO="${{ github.repository }}"
             
             # Add the current repository as a remote
-            git remote add source https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$CURRENT_REPO.git
+            git remote add source https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/$CURRENT_REPO.git
             git fetch source dev
             
             # Try to merge the dev branch from the current repository
             if git merge source/dev -m "Merge $CURRENT_REPO dev branch into $REPO dev branch"; then
-              # Push the changes to the upstream repository
+              # Push the changes to the downstream repository
               git push origin dev
               
-              # Create a pull request in the upstream repository
-              PR_TITLE="Upstream merge from $CURRENT_REPO"
-              PR_BODY="This PR was automatically created by the stage-upstream workflow in $CURRENT_REPO. It merges changes from the dev branch of $CURRENT_REPO into the main branch of $REPO."
+              # Create a pull request in the downstream repository
+              PR_TITLE="Downstream merge from $CURRENT_REPO"
+              PR_BODY="This PR was automatically created by the stage-downstream workflow in $CURRENT_REPO. It merges changes from the dev branch of $CURRENT_REPO into the main branch of $REPO."
               
               PR_RESPONSE=$(curl -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
                 -H "Accept: application/vnd.github.v3+json" \
                 https://api.github.com/repos/$REPO/pulls \
                 -d "{\"title\":\"$PR_TITLE\",\"body\":\"$PR_BODY\",\"head\":\"dev\",\"base\":\"main\"}")
@@ -112,25 +112,25 @@ jobs:
             fi
             
             cd ..
-            rm -rf upstream_repo
+            rm -rf downstream_repo
           done
 
           # Save the PR URLs, numbers and repo names as outputs
-          echo "upstream_prs=$(IFS=,; echo "${PR_URLS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
-          echo "upstream_pr_numbers=$(IFS=,; echo "${PR_NUMBERS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
-          echo "upstream_repo_names=$(IFS=,; echo "${REPO_NAMES[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
+          echo "downstream_prs=$(IFS=,; echo "${PR_URLS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
+          echo "downstream_pr_numbers=$(IFS=,; echo "${PR_NUMBERS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
+          echo "downstream_repo_names=$(IFS=,; echo "${REPO_NAMES[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
 
-  check-upstream-prs:
-    needs: [stage-upstream]
+  check-downstream-prs:
+    needs: [stage-downstream]
     runs-on: ubuntu-latest
     steps:
       - name: Wait for PR checks (30s)
         run: sleep 30
 
-      - name: Check upstream pull request status
+      - name: Check downstream pull request status
         run: |
-          PR_NUMBERS=${{ needs.stage-upstream.outputs.upstream_pr_numbers }}
-          REPO_NAMES=${{ needs.stage-upstream.outputs.upstream_repo_names }}
+          PR_NUMBERS=${{ needs.stage-downstream.outputs.downstream_pr_numbers }}
+          REPO_NAMES=${{ needs.stage-downstream.outputs.downstream_repo_names }}
 
           IFS=',' read -ra PR_ARRAY <<< "$PR_NUMBERS"
           IFS=',' read -ra REPO_ARRAY <<< "$REPO_NAMES"
@@ -142,13 +142,13 @@ jobs:
             echo "Checking status of PR #$PR_NUMBER in repository $REPO"
             
             # Get the PR status
-            PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
             
             # Get the PR checks
             PR_SHA=$(echo $PR_STATUS | jq -r .head.sha)
-            PR_CHECKS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            PR_CHECKS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/$REPO/commits/$PR_SHA/check-runs)
             
@@ -171,4 +171,4 @@ jobs:
             fi
           done
 
-          echo "All upstream pull requests are passing!"
+          echo "All downstream pull requests are passing!"
