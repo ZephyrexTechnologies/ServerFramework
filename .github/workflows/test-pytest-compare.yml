@@ -12,7 +12,9 @@ jobs:
       total: ${{ steps.extract-results.outputs.total }}
       passed: ${{ steps.extract-results.outputs.passed }}
       percentage: ${{ steps.extract-results.outputs.percentage }}
-      collection_errors: ${{ steps.check-collection.outputs.has_errors }}
+      collection_errors: ${{ steps.check-collection.outputs.has_collection_errors }}
+      no_tests_found: ${{ steps.check-collection.outputs.no_tests_found }}
+      has_errors: ${{ steps.check-collection.outputs.has_errors }}
 
     steps:
       - name: Checkout PR Branch
@@ -55,6 +57,10 @@ jobs:
           echo "::debug::Collection completed, checking output file"
           echo "::debug::Collection output file size: $(wc -l collection_output.txt)"
 
+          # Set default values
+          HAS_COLLECTION_ERRORS="false"
+          NO_TESTS_FOUND="false"
+
           echo "::debug::Checking for collection errors"
           if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
             echo "::debug::Collection errors detected, extracting details"
@@ -63,7 +69,8 @@ jobs:
             
             echo "::debug::Attempting to find specific error file"
             ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
-            echo "::debug::Error file identification result: $ERROR_FILE"
+            ERROR_TYPE=$(grep -o "ImportError\|ModuleNotFoundError\|SyntaxError" collection_output.txt | head -1 || echo "Unknown error")
+            echo "::debug::Error file identification result: $ERROR_FILE (Error type: $ERROR_TYPE)"
             
             if [[ "$ERROR_FILE" != "Unknown file" ]]; then
               echo "Error in file $ERROR_FILE"
@@ -72,8 +79,8 @@ jobs:
               grep -A 10 "$ERROR_FILE" collection_output.txt
             fi
             
-            echo "::debug::Setting has_errors=true in GitHub output"
-            echo "has_errors=true" >> $GITHUB_OUTPUT
+            echo "::debug::Setting has_collection_errors=true in GitHub output"
+            HAS_COLLECTION_ERRORS="true"
           else
             echo "::debug::No collection errors detected, checking test count"
             echo "No collection errors detected"
@@ -84,13 +91,22 @@ jobs:
             
             if [[ "$TEST_COUNT" == "0" ]]; then
               echo "::warning::No tests were found in the PR branch"
-              echo "::debug::Setting has_errors=true due to zero tests found"
-              echo "has_errors=true" >> $GITHUB_OUTPUT
+              echo "::debug::Setting no_tests_found=true"
+              NO_TESTS_FOUND="true"
             else  
               echo "Found $TEST_COUNT tests"
-              echo "::debug::Setting has_errors=false"
-              echo "has_errors=false" >> $GITHUB_OUTPUT
             fi
+          fi
+
+          # Set multiple outputs to differentiate between error types
+          echo "has_collection_errors=$HAS_COLLECTION_ERRORS" >> $GITHUB_OUTPUT
+          echo "no_tests_found=$NO_TESTS_FOUND" >> $GITHUB_OUTPUT
+
+          # For backward compatibility
+          if [[ "$HAS_COLLECTION_ERRORS" == "true" || "$NO_TESTS_FOUND" == "true" ]]; then
+            echo "has_errors=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_errors=false" >> $GITHUB_OUTPUT
           fi
 
           echo "::debug::Full collection output for debugging:"
@@ -200,7 +216,9 @@ jobs:
       total: ${{ steps.extract-results.outputs.total }}
       passed: ${{ steps.extract-results.outputs.passed }}
       percentage: ${{ steps.extract-results.outputs.percentage }}
-      collection_errors: ${{ steps.check-collection.outputs.has_errors }}
+      collection_errors: ${{ steps.check-collection.outputs.has_collection_errors }}
+      no_tests_found: ${{ steps.check-collection.outputs.no_tests_found }}
+      has_errors: ${{ steps.check-collection.outputs.has_errors }}
 
     steps:
       - name: Checkout main branch
