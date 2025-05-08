@@ -2,8 +2,11 @@ name: Stage Downstream Repositories
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 jobs:
   check-pr-source:
