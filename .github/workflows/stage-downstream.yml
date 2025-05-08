@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       downstream_prs: ${{ steps.create_prs.outputs.downstream_prs }}
+      downstream_pr_numbers: ${{ steps.create_prs.outputs.downstream_pr_numbers }}
+      downstream_repo_names: ${{ steps.create_prs.outputs.downstream_repo_names }}
     permissions:
       contents: write
       pull-requests: write
@@ -117,8 +119,8 @@ jobs:
 
           # Save the PR URLs, numbers and repo names as outputs
           echo "downstream_prs=$(IFS=,; echo "${PR_URLS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
-          echo "downstream_pr_numbers=$(IFS=,; echo "${PR_NUMBERS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
-          echo "downstream_repo_names=$(IFS=,; echo "${REPO_NAMES[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
+          echo "downstream_pr_numbers=$(IFS=,; echo "${PR_NUMBERS[*]}")" >> $GITHUB_OUTPUT
+          echo "downstream_repo_names=$(IFS=,; echo "${REPO_NAMES[*]}")" >> $GITHUB_OUTPUT
 
   check-downstream-prs:
     needs: [stage-downstream]
@@ -129,8 +131,8 @@ jobs:
 
       - name: Check downstream pull request status
         run: |
-          PR_NUMBERS=${{ needs.stage-downstream.outputs.downstream_pr_numbers }}
-          REPO_NAMES=${{ needs.stage-downstream.outputs.downstream_repo_names }}
+          PR_NUMBERS="${{ needs.stage-downstream.outputs.downstream_pr_numbers }}"
+          REPO_NAMES="${{ needs.stage-downstream.outputs.downstream_repo_names }}"
 
           IFS=',' read -ra PR_ARRAY <<< "$PR_NUMBERS"
           IFS=',' read -ra REPO_ARRAY <<< "$REPO_NAMES"
@@ -169,6 +171,18 @@ jobs:
               echo "::warning::Not all checks have completed for PR #$PR_NUMBER in repository $REPO"
               exit 1
             fi
+            
+            # Also check if PR is mergeable
+            MERGEABLE=$(echo $PR_STATUS | jq -r '.mergeable // "unknown"')
+            MERGEABLE_STATE=$(echo $PR_STATUS | jq -r '.mergeable_state // "unknown"')
+            
+            echo "Mergeable: $MERGEABLE"
+            echo "Mergeable state: $MERGEABLE_STATE"
+            
+            if [ "$MERGEABLE" = "false" ] || [ "$MERGEABLE_STATE" = "dirty" ] || [ "$MERGEABLE_STATE" = "blocked" ]; then
+              echo "::error::PR #$PR_NUMBER in repository $REPO is not mergeable (state: $MERGEABLE_STATE)"
+              exit 1
+            fi
           done
 
-          echo "All downstream pull requests are passing!"
+          echo "All downstream pull requests are passing and mergeable!"
