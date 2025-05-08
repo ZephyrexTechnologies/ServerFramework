@@ -141,19 +141,41 @@ jobs:
                   print('Debug: File opened successfully')
                   pr_results = json.load(f)
                   print(f'Debug: JSON loaded successfully, keys: {list(pr_results.keys())}')
+                  print(f'Debug: Summary key structure: {pr_results[\"summary\"] if \"summary\" in pr_results else \"No summary key\"}')
               
-              pr_total = pr_results['summary']['total']
-              pr_passed = pr_results['summary']['passed']
+              # Check for collection errors by looking at exitcode or error patterns
+              if pr_results.get('exitcode', 0) > 1:
+                  print('Debug: Detected non-zero exitcode, likely a collection error')
+                  # Let's see if we can extract the error message
+                  if 'collectors' in pr_results and pr_results['collectors']:
+                      print(f'Debug: Collection errors found: {pr_results[\"collectors\"]}')
+                  pr_total = 0  # Explicitly set to 0 - no tests run when collection fails
+                  pr_passed = 0
+              elif 'summary' in pr_results and isinstance(pr_results['summary'], dict):
+                  # Normal case - extract data from summary
+                  summary = pr_results['summary']
+                  pr_total = summary.get('total', 0)
+                  pr_passed = summary.get('passed', 0)
+                  print(f'Debug: Results extracted from summary - Total: {pr_total}, Passed: {pr_passed}')
+              else:
+                  print('Debug: No valid summary structure found')
+              
+              # Calculate percentage safely
               pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
+              print(f'Debug: Pass percentage calculated: {pr_percentage:.2f}%')
               
-              print(f'Debug: Results extracted - Total: {pr_total}, Passed: {pr_passed}, Percent: {pr_percentage:.2f}%')
           except FileNotFoundError as e:
               print(f'Debug: File not found error: {e}')
           except KeyError as e:
               print(f'Debug: Missing key in results file: {e}')
-              print(f'Debug: Available keys: {pr_results.keys() if \"pr_results\" in locals() else \"unknown\"}')
+              if 'pr_results' in locals():
+                  print(f'Debug: Available keys: {list(pr_results.keys())}')
+                  if 'summary' in pr_results:
+                      print(f'Debug: Summary structure: {pr_results[\"summary\"]}')
           except Exception as e:
               print(f'Debug: Error processing results: {e}')
+              import traceback
+              print(f'Debug: Full exception: {traceback.format_exc()}')
 
           print(f'Total tests: {pr_total}')
           print(f'Passed tests: {pr_passed}')
@@ -306,19 +328,41 @@ jobs:
                   print('Debug: File opened successfully')
                   main_results = json.load(f)
                   print(f'Debug: JSON loaded successfully, keys: {list(main_results.keys())}')
+                  print(f'Debug: Summary key structure: {main_results[\"summary\"] if \"summary\" in main_results else \"No summary key\"}')
               
-              main_total = main_results['summary']['total']
-              main_passed = main_results['summary']['passed']
+              # Check for collection errors by looking at exitcode or error patterns
+              if main_results.get('exitcode', 0) > 1:
+                  print('Debug: Detected non-zero exitcode, likely a collection error')
+                  # Let's see if we can extract the error message
+                  if 'collectors' in main_results and main_results['collectors']:
+                      print(f'Debug: Collection errors found: {main_results[\"collectors\"]}')
+                  main_total = 0  # Explicitly set to 0 - no tests run when collection fails
+                  main_passed = 0
+              elif 'summary' in main_results and isinstance(main_results['summary'], dict):
+                  # Normal case - extract data from summary
+                  summary = main_results['summary']
+                  main_total = summary.get('total', 0)
+                  main_passed = summary.get('passed', 0)
+                  print(f'Debug: Results extracted from summary - Total: {main_total}, Passed: {main_passed}')
+              else:
+                  print('Debug: No valid summary structure found')
+              
+              # Calculate percentage safely
               main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
+              print(f'Debug: Pass percentage calculated: {main_percentage:.2f}%')
               
-              print(f'Debug: Results extracted - Total: {main_total}, Passed: {main_passed}, Percent: {main_percentage:.2f}%')
           except FileNotFoundError as e:
               print(f'Debug: File not found error: {e}')
           except KeyError as e:
               print(f'Debug: Missing key in results file: {e}')
-              print(f'Debug: Available keys: {main_results.keys() if \"main_results\" in locals() else \"unknown\"}')
+              if 'main_results' in locals():
+                  print(f'Debug: Available keys: {list(main_results.keys())}')
+                  if 'summary' in main_results:
+                      print(f'Debug: Summary structure: {main_results[\"summary\"]}')
           except Exception as e:
               print(f'Debug: Error processing results: {e}')
+              import traceback
+              print(f'Debug: Full exception: {traceback.format_exc()}')
 
           print(f'Total tests: {main_total}')
           print(f'Passed tests: {main_passed}')
