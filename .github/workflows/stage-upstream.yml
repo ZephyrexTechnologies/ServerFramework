@@ -1,0 +1,174 @@
+name: Stage Upstream Repositories
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+jobs:
+  validate-pr-source:
+    runs-on: ubuntu-latest
+    outputs:
+      is_from_dev: ${{ steps.check_branch.outputs.is_from_dev }}
+    steps:
+      - name: Check source branch
+        id: check_branch
+        run: |
+          if [[ "${{ github.head_ref }}" == "dev" ]]; then
+            echo "is_from_dev=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_from_dev=false" >> $GITHUB_OUTPUT
+          fi
+
+  stage-upstream:
+    needs: validate-pr-source
+    if: needs.validate-pr-source.outputs.is_from_dev == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      upstream_prs: ${{ steps.create_prs.outputs.upstream_prs }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+
+      - name: Parse upstream repositories
+        id: parse_repos
+        run: |
+          echo "REPOS=$(echo ${{ secrets.DOWNSTREAM_REPOSITORIES }} | tr ',' ' ')" >> $GITHUB_ENV
+
+      - name: Create upstream pull requests
+        id: create_prs
+        run: |
+          PR_URLS=()
+          PR_NUMBERS=()
+          REPO_NAMES=()
+
+          for REPO in $REPOS; do
+            echo "Processing upstream repository: $REPO"
+            
+            # Clone the upstream repository
+            git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$REPO.git upstream_repo
+            cd upstream_repo
+            
+            # Check if dev branch exists in upstream repository
+            if git ls-remote --heads origin dev | grep -q dev; then
+              git checkout dev
+            else
+              # Create dev branch if it doesn't exist
+              git checkout -b dev
+            fi
+            
+            # Get the current repository name from the environment
+            CURRENT_REPO="${{ github.repository }}"
+            
+            # Add the current repository as a remote
+            git remote add source https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$CURRENT_REPO.git
+            git fetch source dev
+            
+            # Try to merge the dev branch from the current repository
+            if git merge source/dev -m "Merge $CURRENT_REPO dev branch into $REPO dev branch"; then
+              # Push the changes to the upstream repository
+              git push origin dev
+              
+              # Create a pull request in the upstream repository
+              PR_TITLE="Upstream merge from $CURRENT_REPO"
+              PR_BODY="This PR was automatically created by the stage-upstream workflow in $CURRENT_REPO. It merges changes from the dev branch of $CURRENT_REPO into the main branch of $REPO."
+              
+              PR_RESPONSE=$(curl -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                https://api.github.com/repos/$REPO/pulls \
+                -d "{\"title\":\"$PR_TITLE\",\"body\":\"$PR_BODY\",\"head\":\"dev\",\"base\":\"main\"}")
+              
+              PR_URL=$(echo $PR_RESPONSE | jq -r .html_url)
+              PR_NUMBER=$(echo $PR_RESPONSE | jq -r .number)
+              
+              if [[ "$PR_URL" != "null" ]]; then
+                echo "Created PR in $REPO: $PR_URL"
+                PR_URLS+=("$PR_URL")
+                PR_NUMBERS+=("$PR_NUMBER")
+                REPO_NAMES+=("$REPO")
+              else
+                echo "Failed to create PR in $REPO. Response: $PR_RESPONSE"
+                exit 1
+              fi
+            else
+              echo "Failed to merge $CURRENT_REPO/dev into $REPO/dev"
+              exit 1
+            fi
+            
+            cd ..
+            rm -rf upstream_repo
+          done
+
+          # Save the PR URLs, numbers and repo names as outputs
+          echo "upstream_prs=$(IFS=,; echo "${PR_URLS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
+          echo "upstream_pr_numbers=$(IFS=,; echo "${PR_NUMBERS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
+          echo "upstream_repo_names=$(IFS=,; echo "${REPO_NAMES[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_ENV
+
+  check-upstream-prs:
+    needs: [stage-upstream]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for PR checks (30s)
+        run: sleep 30
+
+      - name: Check upstream pull request status
+        run: |
+          PR_NUMBERS=${{ needs.stage-upstream.outputs.upstream_pr_numbers }}
+          REPO_NAMES=${{ needs.stage-upstream.outputs.upstream_repo_names }}
+
+          IFS=',' read -ra PR_ARRAY <<< "$PR_NUMBERS"
+          IFS=',' read -ra REPO_ARRAY <<< "$REPO_NAMES"
+
+          for i in "${!PR_ARRAY[@]}"; do
+            PR_NUMBER=${PR_ARRAY[$i]}
+            REPO=${REPO_ARRAY[$i]}
+            
+            echo "Checking status of PR #$PR_NUMBER in repository $REPO"
+            
+            # Get the PR status
+            PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
+            
+            # Get the PR checks
+            PR_SHA=$(echo $PR_STATUS | jq -r .head.sha)
+            PR_CHECKS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/$REPO/commits/$PR_SHA/check-runs)
+            
+            TOTAL_CHECKS=$(echo $PR_CHECKS | jq '.total_count')
+            COMPLETED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.status == "completed")] | length')
+            FAILED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.conclusion != "success" and .conclusion != "neutral" and .status == "completed")] | length')
+            
+            echo "Total checks: $TOTAL_CHECKS"
+            echo "Completed checks: $COMPLETED_CHECKS"
+            echo "Failed checks: $FAILED_CHECKS"
+            
+            if [ "$FAILED_CHECKS" -gt 0 ]; then
+              echo "::error::PR #$PR_NUMBER in repository $REPO has failed checks"
+              exit 1
+            fi
+            
+            if [ "$COMPLETED_CHECKS" -lt "$TOTAL_CHECKS" ]; then
+              echo "::warning::Not all checks have completed for PR #$PR_NUMBER in repository $REPO"
+              exit 1
+            fi
+          done
+
+          echo "All upstream pull requests are passing!"
