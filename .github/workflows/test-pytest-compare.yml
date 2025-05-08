@@ -25,60 +25,110 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-json-report pytest-asyncio
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          set -x
+          echo "::debug::Upgrading pip with verbose output"
+          python -m pip install --upgrade pip -v
+          echo "::debug::Installing pytest packages with verbose output"
+          pip install -v pytest pytest-json-report pytest-asyncio
+          echo "::debug::Checking for requirements.txt file"
+          if [ -f requirements.txt ]; then 
+            echo "::debug::Installing dependencies from requirements.txt with verbose output"
+            pip install -v -r requirements.txt
+          else 
+            echo "::debug::No requirements.txt file found"
+          fi
 
       - name: Check for test collection errors
         id: check-collection
         run: |
-          # First run pytest in collection only mode
+          set -x
+          echo "::debug::Current working directory: $(pwd)"
+          echo "::debug::Listing python files:"
+          find . -name "*.py" | sort
+          echo "::debug::Python version: $(python --version)"
+          echo "::debug::Installed packages:"
+          pip list
+
+          echo "::debug::Running pytest in collection mode"
           python -m pytest --collect-only -v > collection_output.txt 2>&1 || true
 
-          # Check for various types of collection errors
+          echo "::debug::Collection completed, checking output file"
+          echo "::debug::Collection output file size: $(wc -l collection_output.txt)"
+
+          echo "::debug::Checking for collection errors"
           if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
+            echo "::debug::Collection errors detected, extracting details"
             echo "Collection errors detected:"
             grep -A 10 -B 1 "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt
             
-            # Find the specific file with the error
+            echo "::debug::Attempting to find specific error file"
             ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
+            echo "::debug::Error file identification result: $ERROR_FILE"
             
             if [[ "$ERROR_FILE" != "Unknown file" ]]; then
               echo "Error in file $ERROR_FILE"
               echo "Error details:"
+              echo "::debug::Extracting detailed error information for $ERROR_FILE"
               grep -A 10 "$ERROR_FILE" collection_output.txt
             fi
             
+            echo "::debug::Setting has_errors=true in GitHub output"
             echo "has_errors=true" >> $GITHUB_OUTPUT
           else
+            echo "::debug::No collection errors detected, checking test count"
             echo "No collection errors detected"
             
-            # Check if any tests were collected
+            echo "::debug::Extracting test count from collection output"
             TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
+            echo "::debug::Test count extraction result: $TEST_COUNT"
+            
             if [[ "$TEST_COUNT" == "0" ]]; then
               echo "::warning::No tests were found in the PR branch"
+              echo "::debug::Setting has_errors=true due to zero tests found"
               echo "has_errors=true" >> $GITHUB_OUTPUT
             else  
               echo "Found $TEST_COUNT tests"
+              echo "::debug::Setting has_errors=false"
               echo "has_errors=false" >> $GITHUB_OUTPUT
             fi
           fi
 
-          # Save the collection output for debugging
+          echo "::debug::Full collection output for debugging:"
           cat collection_output.txt
 
       - name: Run tests on PR Branch
         run: |
-          python -m pytest -v --json-report --json-report-file=pr_results.json || true
+          set -x
+          echo "::debug::Current working directory for test run: $(pwd)"
+          echo "::debug::Listing test files before running:"
+          find . -name "test_*.py" -o -name "*_test.py" | sort
+
+          echo "::debug::Running pytest with json report"
+          python -m pytest -vv --json-report --json-report-file=pr_results.json || true
+
+          echo "::debug::Test run completed, checking if json results file exists"
+          if [ -f pr_results.json ]; then
+            echo "::debug::JSON results file size: $(wc -c pr_results.json)"
+            echo "::debug::JSON results file first 100 characters:"
+            head -c 100 pr_results.json
+          else
+            echo "::debug::WARNING: pr_results.json file was not created"
+          fi
 
       - name: Extract test results
         id: extract-results
         run: |
+          set -x
+          echo "::debug::Current branch: $(git rev-parse --abbrev-ref HEAD)"
           echo "PR_BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+
+          echo "::debug::Running Python script to extract test results"
           python -c "
           import json
           import sys
           import os
+
+          print('Debug: Starting test results extraction script')
 
           # Default values in case file doesn't exist or is invalid
           pr_total = 0
@@ -86,25 +136,41 @@ jobs:
           pr_percentage = 0
 
           try:
+              print('Debug: Attempting to open pr_results.json')
               with open('pr_results.json') as f:
+                  print('Debug: File opened successfully')
                   pr_results = json.load(f)
+                  print(f'Debug: JSON loaded successfully, keys: {list(pr_results.keys())}')
               
               pr_total = pr_results['summary']['total']
               pr_passed = pr_results['summary']['passed']
               pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
+              
+              print(f'Debug: Results extracted - Total: {pr_total}, Passed: {pr_passed}, Percent: {pr_percentage:.2f}%')
+          except FileNotFoundError as e:
+              print(f'Debug: File not found error: {e}')
+          except KeyError as e:
+              print(f'Debug: Missing key in results file: {e}')
+              print(f'Debug: Available keys: {pr_results.keys() if \"pr_results\" in locals() else \"unknown\"}')
           except Exception as e:
-              print(f'Error processing results: {e}')
+              print(f'Debug: Error processing results: {e}')
 
           print(f'Total tests: {pr_total}')
           print(f'Passed tests: {pr_passed}')
           print(f'Pass percentage: {pr_percentage:.2f}%')
 
           # Set outputs for GitHub Actions
+          print('Debug: Writing results to GITHUB_OUTPUT')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'total={pr_total}\\n')
               f.write(f'passed={pr_passed}\\n')
               f.write(f'percentage={pr_percentage:.2f}\\n')
+
+          print('Debug: Results extraction completed')
           "
+
+          echo "::debug::GITHUB_OUTPUT file content:"
+          cat $GITHUB_OUTPUT
 
   test-main-branch:
     runs-on: ubuntu-latest
@@ -127,59 +193,107 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-json-report pytest-asyncio
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          set -x
+          echo "::debug::Upgrading pip with verbose output"
+          python -m pip install --upgrade pip -v
+          echo "::debug::Installing pytest packages with verbose output"
+          pip install -v pytest pytest-json-report pytest-asyncio
+          echo "::debug::Checking for requirements.txt file"
+          if [ -f requirements.txt ]; then 
+            echo "::debug::Installing dependencies from requirements.txt with verbose output"
+            pip install -v -r requirements.txt
+          else 
+            echo "::debug::No requirements.txt file found"
+          fi
 
       - name: Check for test collection errors
         id: check-collection
         run: |
-          # First run pytest in collection only mode
+          set -x
+          echo "::debug::Current working directory: $(pwd)"
+          echo "::debug::Listing python files:"
+          find . -name "*.py" | sort
+          echo "::debug::Python version: $(python --version)"
+          echo "::debug::Installed packages:"
+          pip list
+
+          echo "::debug::Running pytest in collection mode"
           python -m pytest --collect-only -v > collection_output.txt 2>&1 || true
 
-          # Check for various types of collection errors
+          echo "::debug::Collection completed, checking output file"
+          echo "::debug::Collection output file size: $(wc -l collection_output.txt)"
+
+          echo "::debug::Checking for collection errors"
           if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
+            echo "::debug::Collection errors detected, extracting details"
             echo "Collection errors detected:"
             grep -A 10 -B 1 "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt
             
-            # Find the specific file with the error
+            echo "::debug::Attempting to find specific error file"
             ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
+            echo "::debug::Error file identification result: $ERROR_FILE"
             
             if [[ "$ERROR_FILE" != "Unknown file" ]]; then
               echo "Error in file $ERROR_FILE"
               echo "Error details:"
+              echo "::debug::Extracting detailed error information for $ERROR_FILE"
               grep -A 10 "$ERROR_FILE" collection_output.txt
             fi
             
+            echo "::debug::Setting has_errors=true in GitHub output"
             echo "has_errors=true" >> $GITHUB_OUTPUT
           else
+            echo "::debug::No collection errors detected, checking test count"
             echo "No collection errors detected"
             
-            # Check if any tests were collected
+            echo "::debug::Extracting test count from collection output"
             TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
+            echo "::debug::Test count extraction result: $TEST_COUNT"
+            
             if [[ "$TEST_COUNT" == "0" ]]; then
               echo "::warning::No tests were found in the main branch"
+              echo "::debug::Setting has_errors=true due to zero tests found"
               echo "has_errors=true" >> $GITHUB_OUTPUT
             else  
               echo "Found $TEST_COUNT tests"
+              echo "::debug::Setting has_errors=false"
               echo "has_errors=false" >> $GITHUB_OUTPUT
             fi
           fi
 
-          # Save the collection output for debugging
+          echo "::debug::Full collection output for debugging:"
           cat collection_output.txt
 
       - name: Run tests on main branch
         run: |
-          python -m pytest -v --json-report --json-report-file=main_results.json || true
+          set -x
+          echo "::debug::Current working directory for test run: $(pwd)"
+          echo "::debug::Listing test files before running:"
+          find . -name "test_*.py" -o -name "*_test.py" | sort
+
+          echo "::debug::Running pytest with json report"
+          python -m pytest -vv --json-report --json-report-file=main_results.json || true
+
+          echo "::debug::Test run completed, checking if json results file exists"
+          if [ -f main_results.json ]; then
+            echo "::debug::JSON results file size: $(wc -c main_results.json)"
+            echo "::debug::JSON results file first 100 characters:"
+            head -c 100 main_results.json
+          else
+            echo "::debug::WARNING: main_results.json file was not created"
+          fi
 
       - name: Extract test results
         id: extract-results
         run: |
+          set -x
+          echo "::debug::Running Python script to extract test results"
           python -c "
           import json
           import sys
           import os
+
+          print('Debug: Starting test results extraction script')
 
           # Default values in case file doesn't exist or is invalid
           main_total = 0
@@ -187,25 +301,41 @@ jobs:
           main_percentage = 0
 
           try:
+              print('Debug: Attempting to open main_results.json')
               with open('main_results.json') as f:
+                  print('Debug: File opened successfully')
                   main_results = json.load(f)
+                  print(f'Debug: JSON loaded successfully, keys: {list(main_results.keys())}')
               
               main_total = main_results['summary']['total']
               main_passed = main_results['summary']['passed']
               main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
+              
+              print(f'Debug: Results extracted - Total: {main_total}, Passed: {main_passed}, Percent: {main_percentage:.2f}%')
+          except FileNotFoundError as e:
+              print(f'Debug: File not found error: {e}')
+          except KeyError as e:
+              print(f'Debug: Missing key in results file: {e}')
+              print(f'Debug: Available keys: {main_results.keys() if \"main_results\" in locals() else \"unknown\"}')
           except Exception as e:
-              print(f'Error processing results: {e}')
+              print(f'Debug: Error processing results: {e}')
 
           print(f'Total tests: {main_total}')
           print(f'Passed tests: {main_passed}')
           print(f'Pass percentage: {main_percentage:.2f}%')
 
           # Set outputs for GitHub Actions
+          print('Debug: Writing results to GITHUB_OUTPUT')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'total={main_total}\\n')
               f.write(f'passed={main_passed}\\n')
               f.write(f'percentage={main_percentage:.2f}\\n')
+
+          print('Debug: Results extraction completed')
           "
+
+          echo "::debug::GITHUB_OUTPUT file content:"
+          cat $GITHUB_OUTPUT
 
   compare-results:
     needs: [test-pr-branch, test-main-branch]
@@ -213,46 +343,80 @@ jobs:
 
     steps:
       - name: Install bc
-        run: sudo apt-get install -y bc
+        run: |
+          set -x
+          echo "::debug::Installing bc package for numeric comparison"
+          sudo apt-get update -y
+          sudo apt-get install -y bc
 
       - name: Check for collection errors
         run: |
+          set -x
+          echo "::debug::Retrieving collection error status"
           PR_ERRORS="${{ needs.test-pr-branch.outputs.collection_errors }}"
           MAIN_ERRORS="${{ needs.test-main-branch.outputs.collection_errors }}"
 
+          echo "::debug::PR branch errors: $PR_ERRORS"
+          echo "::debug::Main branch errors: $MAIN_ERRORS"
+
           if [[ "$PR_ERRORS" == "true" ]]; then
+            echo "::debug::PR branch has errors, failing workflow"
             echo "::error::Test collection errors or no tests detected in PR branch"
             echo "❌ PR branch has test collection errors or no tests"
             exit 1
           fi
 
           if [[ "$MAIN_ERRORS" == "true" ]]; then
+            echo "::debug::Main branch has errors, displaying warning"
             echo "⚠️ Main branch has test collection errors or no tests"
             # Don't fail the workflow, just warn that main branch has issues
           fi
 
       - name: Compare test results
         run: |
+          set -x
+          echo "::debug::Starting test results comparison"
+
+          # Print all input values for debugging
+          echo "::debug::Main branch total: ${{ needs.test-main-branch.outputs.total }}"
+          echo "::debug::Main branch passed: ${{ needs.test-main-branch.outputs.passed }}"
+          echo "::debug::Main branch percentage: ${{ needs.test-main-branch.outputs.percentage }}"
+          echo "::debug::PR branch total: ${{ needs.test-pr-branch.outputs.total }}"
+          echo "::debug::PR branch passed: ${{ needs.test-pr-branch.outputs.passed }}"
+          echo "::debug::PR branch percentage: ${{ needs.test-pr-branch.outputs.percentage }}"
+
           echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
           echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
 
-          # Check if PR branch has any tests
+          echo "::debug::Checking if PR branch has tests"
           if [[ "${{ needs.test-pr-branch.outputs.total }}" == "0" ]]; then
+            echo "::debug::PR branch has no tests, failing workflow"
             echo "::error::No tests were found in the PR branch"
             echo "❌ PR branch has no tests detected"
             exit 1
           fi
 
-          # Convert string outputs to numbers for comparison
+          echo "::debug::Converting string outputs to variables for comparison"
           PR_PASSED=${{ needs.test-pr-branch.outputs.passed }}
           MAIN_PASSED=${{ needs.test-main-branch.outputs.passed }}
           PR_PERCENTAGE=${{ needs.test-pr-branch.outputs.percentage }}
           MAIN_PERCENTAGE=${{ needs.test-main-branch.outputs.percentage }}
 
+          echo "::debug::PR_PASSED=$PR_PASSED"
+          echo "::debug::MAIN_PASSED=$MAIN_PASSED"
+          echo "::debug::PR_PERCENTAGE=$PR_PERCENTAGE"
+          echo "::debug::MAIN_PERCENTAGE=$MAIN_PERCENTAGE"
+
+          echo "::debug::Performing comparison with bc"
+          echo "::debug::Comparing passed tests: $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l)"
+          echo "::debug::Comparing pass percentage: $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l)"
+
           if (( $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l) )); then
+            echo "::debug::PR branch has equal or better results"
             echo "✅ PR branch has equal or better test results than main branch"
             exit 0
           else
+            echo "::debug::PR branch has worse results"
             echo "❌ PR branch has worse test results than main branch"
             echo "  - Passed tests: $PR_PASSED vs $MAIN_PASSED on main"
             echo "  - Pass percentage: $PR_PERCENTAGE% vs $MAIN_PERCENTAGE% on main"
