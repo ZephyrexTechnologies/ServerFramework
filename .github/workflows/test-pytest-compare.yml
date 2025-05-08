@@ -1,6 +1,8 @@
-name: Compare Pytest Results
+name: Run and Compare Python Tests
 
 on:
+  pull_request:
+    branches: [main]
   workflow_call:
 
 jobs:
@@ -10,8 +12,7 @@ jobs:
       total: ${{ steps.extract-results.outputs.total }}
       passed: ${{ steps.extract-results.outputs.passed }}
       percentage: ${{ steps.extract-results.outputs.percentage }}
-      has_errors: ${{ steps.extract-results.outputs.has_errors }}
-      error_message: ${{ steps.extract-results.outputs.error_message }}
+      collection_errors: ${{ steps.check-collection.outputs.has_errors }}
 
     steps:
       - name: Checkout PR Branch
@@ -28,104 +29,47 @@ jobs:
           pip install pytest pytest-json-report pytest-asyncio
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Discover test files
-        id: discover-tests
+      - name: Check for test collection errors
+        id: check-collection
         run: |
-          echo "Looking for test files in repository..."
-          TEST_FILES=$(find . -name "test_*.py" -o -name "*_test.py" | sort)
-          TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
+          # First run pytest in collection only mode
+          python -m pytest --collect-only -v > collection_output.txt 2>&1 || true
 
-          if [ "$TEST_COUNT" -eq 0 ]; then
-            echo "::warning::No test files found with standard pytest naming patterns!"
-            echo "Looking for alternative test file patterns..."
-            ALT_TEST_FILES=$(find . -type f -name "*.py" | xargs grep -l "def test_" | sort)
-            ALT_TEST_COUNT=$(echo "$ALT_TEST_FILES" | wc -l)
+          # Check for various types of collection errors
+          if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
+            echo "Collection errors detected:"
+            grep -A 10 -B 1 "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt
             
-            if [ "$ALT_TEST_COUNT" -eq 0 ]; then
-              echo "::error::No Python test files found in repository!"
-            else
-              echo "Found $ALT_TEST_COUNT Python files containing test functions:"
-              echo "$ALT_TEST_FILES"
+            # Find the specific file with the error
+            ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
+            
+            if [[ "$ERROR_FILE" != "Unknown file" ]]; then
+              echo "Error in file $ERROR_FILE"
+              echo "Error details:"
+              grep -A 10 "$ERROR_FILE" collection_output.txt
             fi
+            
+            echo "has_errors=true" >> $GITHUB_OUTPUT
           else
-            echo "Found $TEST_COUNT pytest files:"
-            echo "$TEST_FILES"
+            echo "No collection errors detected"
+            
+            # Check if any tests were collected
+            TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
+            if [[ "$TEST_COUNT" == "0" ]]; then
+              echo "::warning::No tests were found in the PR branch"
+              echo "has_errors=true" >> $GITHUB_OUTPUT
+            else  
+              echo "Found $TEST_COUNT tests"
+              echo "has_errors=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
-      - name: Show pytest collection
-        run: |
-          echo "Displaying test collection (without running tests):"
-          python -m pytest --collect-only -v || true
+          # Save the collection output for debugging
+          cat collection_output.txt
 
       - name: Run tests on PR Branch
-        id: run-tests
         run: |
-          echo "Running pytest with verbose output first to diagnose any issues:"
-          python -m pytest -v --no-header --no-summary || true
-
-          echo "Now running with JSON report for results processing:"
-          # Save both stdout and stderr to files
-          python -m pytest -q --json-report --json-report-file=pr_results.json > pr_stdout.txt 2> pr_stderr.txt || true
-
-          # Dump stderr to a file for debugging
-          cat pr_stderr.txt > error_log.txt
-          echo "======== ERROR LOG CONTENT ========" >> $GITHUB_STEP_SUMMARY
-          cat error_log.txt >> $GITHUB_STEP_SUMMARY
-          echo "==================================" >> $GITHUB_STEP_SUMMARY
-
-          # Much more aggressive pattern matching for collection errors
-          if cat pr_stderr.txt | grep -q "ERROR collecting" || 
-             cat pr_stderr.txt | grep -q "Interrupted.*error during collection" || 
-             cat pr_stderr.txt | grep -q "ImportError" ||
-             cat pr_stderr.txt | grep -q "!!!.*Interrupted.*!!!" ||
-             cat pr_stderr.txt | grep -q "^ERROR " ||
-             ! [ -s pr_results.json ] ||
-             [ $(jq '.summary.total' pr_results.json 2>/dev/null || echo "0") = "0" ]; then
-            echo "Collection errors found in PR branch!"
-            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            
-            # Create a comprehensive error log with context
-            echo "=== Detected Test Collection Errors ===" > pr_errors.txt
-            
-            # Extract import errors (most common)
-            if grep -q "ImportError" pr_stderr.txt; then
-              echo "Import Error Details:" >> pr_errors.txt
-              grep -A 15 -B 3 "ImportError" pr_stderr.txt >> pr_errors.txt
-            fi
-            
-            # Extract standard collection errors
-            if grep -q "ERROR collecting" pr_stderr.txt; then
-              echo "Collection Error Details:" >> pr_errors.txt
-              grep -A 15 -B 3 "ERROR collecting" pr_stderr.txt >> pr_errors.txt
-            fi
-            
-            # Extract the error summary line with exclamation marks
-            if grep -q "!!!" pr_stderr.txt; then
-              echo "Error Summary:" >> pr_errors.txt
-              grep "!!!" pr_stderr.txt >> pr_errors.txt
-            fi
-            
-            # If nothing specific was captured, include the whole stderr
-            if [ ! -s pr_errors.txt ]; then
-              echo "Full Error Log:" >> pr_errors.txt
-              cat pr_stderr.txt >> pr_errors.txt
-            fi
-          else
-            echo "No collection errors found in PR branch"
-            echo "has_collection_errors=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check if JSON report was created and contains valid data
-          if [ ! -f pr_results.json ] || [ $(jq '.summary.total' pr_results.json 2>/dev/null || echo "0") = "0" ]; then
-            echo "::warning::No valid test results JSON file was created!"
-            echo '{"summary": {"total": 0, "passed": 0}}' > pr_results.json
-            
-            # Only set collection errors if we didn't already find them
-            if [ "$(cat $GITHUB_OUTPUT | grep -c 'has_collection_errors')" -eq 0 ]; then
-              echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-              echo "No tests were executed - JSON report was not created or invalid" > pr_errors.txt
-            fi
-          fi
+          python -m pytest -v --json-report --json-report-file=pr_results.json || true
 
       - name: Extract test results
         id: extract-results
@@ -135,83 +79,32 @@ jobs:
           import json
           import sys
           import os
-          import re
 
-          # Check for collection errors from the previous step
-          has_errors = '${{ steps.run-tests.outputs.has_collection_errors }}' == 'true'
-          error_message = ''
+          # Default values in case file doesn't exist or is invalid
+          pr_total = 0
+          pr_passed = 0
+          pr_percentage = 0
 
-          if has_errors:
-              # Read error details if available
-              if os.path.exists('pr_errors.txt'):
-                  with open('pr_errors.txt', 'r') as f:
-                      error_text = f.read()
-                      # Try to extract the most relevant error message
-                      # First try to extract the import error message
-                      import_error_match = re.search(r'ImportError: (.+)', error_text)
-                      if import_error_match:
-                          error_message = f'Import error: {import_error_match.group(1)}'
-                      else:
-                          # Try to extract ERROR collecting message
-                          error_match = re.search(r'ERROR collecting (.+?)\\n', error_text)
-                          if error_match:
-                              error_message = f'Collection error in {error_match.group(1)}'
-                          else:
-                              # Try to extract the Interrupted line
-                              interrupted_match = re.search(r'(Interrupted:.* error during collection)', error_text)
-                              if interrupted_match:
-                                  error_message = interrupted_match.group(1)
-                              else:
-                                  # Just use the first non-empty line
-                                  lines = [line.strip() for line in error_text.split('\\n') if line.strip()]
-                                  if lines:
-                                      error_message = lines[0][:200]  # Limit to 200 chars
-                                  else:
-                                      error_message = 'Collection errors found in tests'
-
-          # Parse test results
           try:
               with open('pr_results.json') as f:
                   pr_results = json.load(f)
               
-              # Handle missing keys with default values
-              summary = pr_results.get('summary', {})
-              pr_total = summary.get('total', 0)
-              pr_passed = summary.get('passed', 0)
-          except (json.JSONDecodeError, FileNotFoundError):
-              print('Error parsing JSON results file, using defaults')
-              pr_total = 0
-              pr_passed = 0
-
-          pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
+              pr_total = pr_results['summary']['total']
+              pr_passed = pr_results['summary']['passed']
+              pr_percentage = (pr_passed / pr_total * 100) if pr_total > 0 else 0
+          except Exception as e:
+              print(f'Error processing results: {e}')
 
           print(f'Total tests: {pr_total}')
           print(f'Passed tests: {pr_passed}')
           print(f'Pass percentage: {pr_percentage:.2f}%')
-
-          if has_errors:
-              print(f'Collection errors found: {error_message}')
 
           # Set outputs for GitHub Actions
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'total={pr_total}\\n')
               f.write(f'passed={pr_passed}\\n')
               f.write(f'percentage={pr_percentage:.2f}\\n')
-              f.write(f'has_errors={str(has_errors).lower()}\\n')
-              f.write(f'error_message={error_message}\\n')
           "
-
-      # Upload error logs as artifacts if collection errors were found
-      - name: Upload error logs
-        if: steps.run-tests.outputs.has_collection_errors == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr-branch-error-logs
-          path: |
-            pr_errors.txt
-            pr_stderr.txt
-            error_log.txt
-          retention-days: 5
 
   test-main-branch:
     runs-on: ubuntu-latest
@@ -219,8 +112,7 @@ jobs:
       total: ${{ steps.extract-results.outputs.total }}
       passed: ${{ steps.extract-results.outputs.passed }}
       percentage: ${{ steps.extract-results.outputs.percentage }}
-      has_errors: ${{ steps.extract-results.outputs.has_errors }}
-      error_message: ${{ steps.extract-results.outputs.error_message }}
+      collection_errors: ${{ steps.check-collection.outputs.has_errors }}
 
     steps:
       - name: Checkout main branch
@@ -239,104 +131,47 @@ jobs:
           pip install pytest pytest-json-report pytest-asyncio
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Discover test files
-        id: discover-tests
+      - name: Check for test collection errors
+        id: check-collection
         run: |
-          echo "Looking for test files in repository..."
-          TEST_FILES=$(find . -name "test_*.py" -o -name "*_test.py" | sort)
-          TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
+          # First run pytest in collection only mode
+          python -m pytest --collect-only -v > collection_output.txt 2>&1 || true
 
-          if [ "$TEST_COUNT" -eq 0 ]; then
-            echo "::warning::No test files found with standard pytest naming patterns!"
-            echo "Looking for alternative test file patterns..."
-            ALT_TEST_FILES=$(find . -type f -name "*.py" | xargs grep -l "def test_" | sort)
-            ALT_TEST_COUNT=$(echo "$ALT_TEST_FILES" | wc -l)
+          # Check for various types of collection errors
+          if grep -q "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt; then
+            echo "Collection errors detected:"
+            grep -A 10 -B 1 "ImportError\|ModuleNotFoundError\|SyntaxError\|ERROR collecting\|Interrupted:" collection_output.txt
             
-            if [ "$ALT_TEST_COUNT" -eq 0 ]; then
-              echo "::error::No Python test files found in repository!"
-            else
-              echo "Found $ALT_TEST_COUNT Python files containing test functions:"
-              echo "$ALT_TEST_FILES"
+            # Find the specific file with the error
+            ERROR_FILE=$(grep -o "ERROR collecting.*\.py" collection_output.txt | grep -o "[a-zA-Z0-9_/]*\.py" || echo "Unknown file")
+            
+            if [[ "$ERROR_FILE" != "Unknown file" ]]; then
+              echo "Error in file $ERROR_FILE"
+              echo "Error details:"
+              grep -A 10 "$ERROR_FILE" collection_output.txt
             fi
+            
+            echo "has_errors=true" >> $GITHUB_OUTPUT
           else
-            echo "Found $TEST_COUNT pytest files:"
-            echo "$TEST_FILES"
+            echo "No collection errors detected"
+            
+            # Check if any tests were collected
+            TEST_COUNT=$(grep -o "collected [0-9]* item" collection_output.txt | grep -o "[0-9]*" || echo "0")
+            if [[ "$TEST_COUNT" == "0" ]]; then
+              echo "::warning::No tests were found in the main branch"
+              echo "has_errors=true" >> $GITHUB_OUTPUT
+            else  
+              echo "Found $TEST_COUNT tests"
+              echo "has_errors=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
-      - name: Show pytest collection
-        run: |
-          echo "Displaying test collection (without running tests):"
-          python -m pytest --collect-only -v || true
+          # Save the collection output for debugging
+          cat collection_output.txt
 
       - name: Run tests on main branch
-        id: run-tests
         run: |
-          echo "Running pytest with verbose output first to diagnose any issues:"
-          python -m pytest -v --no-header --no-summary || true
-
-          echo "Now running with JSON report for results processing:"
-          # Save both stdout and stderr to files
-          python -m pytest -q --json-report --json-report-file=main_results.json > main_stdout.txt 2> main_stderr.txt || true
-
-          # Dump stderr to a file for debugging
-          cat main_stderr.txt > error_log.txt
-          echo "======== ERROR LOG CONTENT ========" >> $GITHUB_STEP_SUMMARY
-          cat error_log.txt >> $GITHUB_STEP_SUMMARY
-          echo "==================================" >> $GITHUB_STEP_SUMMARY
-
-          # Much more aggressive pattern matching for collection errors
-          if cat main_stderr.txt | grep -q "ERROR collecting" || 
-             cat main_stderr.txt | grep -q "Interrupted.*error during collection" || 
-             cat main_stderr.txt | grep -q "ImportError" ||
-             cat main_stderr.txt | grep -q "!!!.*Interrupted.*!!!" ||
-             cat main_stderr.txt | grep -q "^ERROR " ||
-             ! [ -s main_results.json ] ||
-             [ $(jq '.summary.total' main_results.json 2>/dev/null || echo "0") = "0" ]; then
-            echo "Collection errors found in main branch!"
-            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            
-            # Create a comprehensive error log with context
-            echo "=== Detected Test Collection Errors ===" > main_errors.txt
-            
-            # Extract import errors (most common)
-            if grep -q "ImportError" main_stderr.txt; then
-              echo "Import Error Details:" >> main_errors.txt
-              grep -A 15 -B 3 "ImportError" main_stderr.txt >> main_errors.txt
-            fi
-            
-            # Extract standard collection errors
-            if grep -q "ERROR collecting" main_stderr.txt; then
-              echo "Collection Error Details:" >> main_errors.txt
-              grep -A 15 -B 3 "ERROR collecting" main_stderr.txt >> main_errors.txt
-            fi
-            
-            # Extract the error summary line with exclamation marks
-            if grep -q "!!!" main_stderr.txt; then
-              echo "Error Summary:" >> main_errors.txt
-              grep "!!!" main_stderr.txt >> main_errors.txt
-            fi
-            
-            # If nothing specific was captured, include the whole stderr
-            if [ ! -s main_errors.txt ]; then
-              echo "Full Error Log:" >> main_errors.txt
-              cat main_stderr.txt >> main_errors.txt
-            fi
-          else
-            echo "No collection errors found in main branch"
-            echo "has_collection_errors=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check if JSON report was created and contains valid data
-          if [ ! -f main_results.json ] || [ $(jq '.summary.total' main_results.json 2>/dev/null || echo "0") = "0" ]; then
-            echo "::warning::No valid test results JSON file was created!"
-            echo '{"summary": {"total": 0, "passed": 0}}' > main_results.json
-            
-            # Only set collection errors if we didn't already find them
-            if [ "$(cat $GITHUB_OUTPUT | grep -c 'has_collection_errors')" -eq 0 ]; then
-              echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-              echo "No tests were executed - JSON report was not created or invalid" > main_errors.txt
-            fi
-          fi
+          python -m pytest -v --json-report --json-report-file=main_results.json || true
 
       - name: Extract test results
         id: extract-results
@@ -345,161 +180,81 @@ jobs:
           import json
           import sys
           import os
-          import re
 
-          # Check for collection errors from the previous step
-          has_errors = '${{ steps.run-tests.outputs.has_collection_errors }}' == 'true'
-          error_message = ''
+          # Default values in case file doesn't exist or is invalid
+          main_total = 0
+          main_passed = 0
+          main_percentage = 0
 
-          if has_errors:
-              # Read error details if available
-              if os.path.exists('main_errors.txt'):
-                  with open('main_errors.txt', 'r') as f:
-                      error_text = f.read()
-                      # Try to extract the most relevant error message
-                      # First try to extract the import error message
-                      import_error_match = re.search(r'ImportError: (.+)', error_text)
-                      if import_error_match:
-                          error_message = f'Import error: {import_error_match.group(1)}'
-                      else:
-                          # Try to extract ERROR collecting message
-                          error_match = re.search(r'ERROR collecting (.+?)\\n', error_text)
-                          if error_match:
-                              error_message = f'Collection error in {error_match.group(1)}'
-                          else:
-                              # Try to extract the Interrupted line
-                              interrupted_match = re.search(r'(Interrupted:.* error during collection)', error_text)
-                              if interrupted_match:
-                                  error_message = interrupted_match.group(1)
-                              else:
-                                  # Just use the first non-empty line
-                                  lines = [line.strip() for line in error_text.split('\\n') if line.strip()]
-                                  if lines:
-                                      error_message = lines[0][:200]  # Limit to 200 chars
-                                  else:
-                                      error_message = 'Collection errors found in tests'
-
-          # Parse test results
           try:
               with open('main_results.json') as f:
                   main_results = json.load(f)
               
-              # Handle missing keys with default values
-              summary = main_results.get('summary', {})
-              main_total = summary.get('total', 0)
-              main_passed = summary.get('passed', 0)
-          except (json.JSONDecodeError, FileNotFoundError):
-              print('Error parsing JSON results file, using defaults')
-              main_total = 0
-              main_passed = 0
-
-          main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
+              main_total = main_results['summary']['total']
+              main_passed = main_results['summary']['passed']
+              main_percentage = (main_passed / main_total * 100) if main_total > 0 else 0
+          except Exception as e:
+              print(f'Error processing results: {e}')
 
           print(f'Total tests: {main_total}')
           print(f'Passed tests: {main_passed}')
           print(f'Pass percentage: {main_percentage:.2f}%')
-
-          if has_errors:
-              print(f'Collection errors found: {error_message}')
 
           # Set outputs for GitHub Actions
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'total={main_total}\\n')
               f.write(f'passed={main_passed}\\n')
               f.write(f'percentage={main_percentage:.2f}\\n')
-              f.write(f'has_errors={str(has_errors).lower()}\\n')
-              f.write(f'error_message={error_message}\\n')
           "
-
-      # Upload error logs as artifacts if collection errors were found
-      - name: Upload error logs
-        if: steps.run-tests.outputs.has_collection_errors == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: main-branch-error-logs
-          path: |
-            main_errors.txt
-            main_stderr.txt
-            error_log.txt
-          retention-days: 5
 
   compare-results:
     needs: [test-pr-branch, test-main-branch]
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install bc
+        run: sudo apt-get install -y bc
+
+      - name: Check for collection errors
+        run: |
+          PR_ERRORS="${{ needs.test-pr-branch.outputs.collection_errors }}"
+          MAIN_ERRORS="${{ needs.test-main-branch.outputs.collection_errors }}"
+
+          if [[ "$PR_ERRORS" == "true" ]]; then
+            echo "::error::Test collection errors or no tests detected in PR branch"
+            echo "❌ PR branch has test collection errors or no tests"
+            exit 1
+          fi
+
+          if [[ "$MAIN_ERRORS" == "true" ]]; then
+            echo "⚠️ Main branch has test collection errors or no tests"
+            # Don't fail the workflow, just warn that main branch has issues
+          fi
+
       - name: Compare test results
         run: |
           echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
           echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
 
-          # Check for collection errors
-          PR_HAS_ERRORS="${{ needs.test-pr-branch.outputs.has_errors }}"
-          MAIN_HAS_ERRORS="${{ needs.test-main-branch.outputs.has_errors }}"
-
-          if [ "$PR_HAS_ERRORS" == "true" ]; then
-            echo "⚠️ PR branch has collection errors: ${{ needs.test-pr-branch.outputs.error_message }}"
+          # Check if PR branch has any tests
+          if [[ "${{ needs.test-pr-branch.outputs.total }}" == "0" ]]; then
+            echo "::error::No tests were found in the PR branch"
+            echo "❌ PR branch has no tests detected"
+            exit 1
           fi
 
-          if [ "$MAIN_HAS_ERRORS" == "true" ]; then
-            echo "ℹ️ Main branch has collection errors: ${{ needs.test-main-branch.outputs.error_message }}"
+          # Convert string outputs to numbers for comparison
+          PR_PASSED=${{ needs.test-pr-branch.outputs.passed }}
+          MAIN_PASSED=${{ needs.test-main-branch.outputs.passed }}
+          PR_PERCENTAGE=${{ needs.test-pr-branch.outputs.percentage }}
+          MAIN_PERCENTAGE=${{ needs.test-main-branch.outputs.percentage }}
+
+          if (( $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l) )); then
+            echo "✅ PR branch has equal or better test results than main branch"
+            exit 0
+          else
+            echo "❌ PR branch has worse test results than main branch"
+            echo "  - Passed tests: $PR_PASSED vs $MAIN_PASSED on main"
+            echo "  - Pass percentage: $PR_PERCENTAGE% vs $MAIN_PERCENTAGE% on main"
+            exit 1
           fi
-
-          # Use Python for more complex comparison logic
-          python -c "
-          import sys
-
-          # Test counts
-          pr_total = float('${{ needs.test-pr-branch.outputs.total }}')
-          main_total = float('${{ needs.test-main-branch.outputs.total }}')
-          pr_passed = float('${{ needs.test-pr-branch.outputs.passed }}')
-          main_passed = float('${{ needs.test-main-branch.outputs.passed }}')
-          pr_percentage = float('${{ needs.test-pr-branch.outputs.percentage }}')
-          main_percentage = float('${{ needs.test-main-branch.outputs.percentage }}')
-
-          # Error states
-          pr_has_errors = '${{ needs.test-pr-branch.outputs.has_errors }}' == 'true'
-          main_has_errors = '${{ needs.test-main-branch.outputs.has_errors }}' == 'true'
-
-          # First check for collection errors
-          if pr_has_errors and not main_has_errors:
-              print('❌ PR branch has collection errors but main branch does not!')
-              print('   This is a regression. Please fix the collection errors in your branch.')
-              sys.exit(1)
-
-          # Check for no tests
-          if pr_total == 0:
-              if main_total > 0:
-                  print('❌ PR branch has no tests but main branch has {main_total} tests')
-                  print('   This is a regression. No tests were collected in your branch.')
-                  sys.exit(1)
-              else:
-                  print('⚠️ Neither branch has tests.')
-                  if pr_has_errors or main_has_errors:
-                      print('   Both branches have collection errors that need to be addressed.')
-                  sys.exit(0)
-
-          # Compare test results only if both branches have tests with no collection errors
-          # or if both have collection errors (existing condition)
-          if (not pr_has_errors and not main_has_errors) or (pr_has_errors and main_has_errors):
-              if pr_passed >= main_passed and pr_percentage >= main_percentage:
-                  print('✅ PR branch has equal or better test results than main branch')
-                  if pr_has_errors and main_has_errors:
-                      print('   Note: Both branches have collection errors that should be fixed.')
-                  sys.exit(0)
-              else:
-                  print('❌ PR branch has worse test results than main branch')
-                  print(f'  - Passed tests: {pr_passed} vs {main_passed} on main')
-                  print(f'  - Pass percentage: {pr_percentage}% vs {main_percentage}% on main')
-                  sys.exit(1)
-
-          # If we get here, it's because the PR has fewer collection errors than main
-          # which is technically an improvement
-          if not pr_has_errors and main_has_errors:
-              print('✅ PR branch IMPROVES on main branch by fixing collection errors!')
-              sys.exit(0)
-
-          # Fallback (shouldn't reach here with our logic)
-          print('⚠️ Unexpected comparison state. Allowing tests to pass.')
-          sys.exit(0)
-          "
