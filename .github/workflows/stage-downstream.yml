@@ -86,28 +86,41 @@ jobs:
               # Push the changes to the downstream repository
               git push origin dev
               
-              # Create a pull request in the downstream repository
-              PR_TITLE="Downstream merge from $CURRENT_REPO"
-              PR_BODY="This PR was automatically created by the stage-downstream workflow in $CURRENT_REPO. It merges changes from the dev branch of $CURRENT_REPO into the main branch of $REPO."
-              
-              PR_RESPONSE=$(curl -X POST \
-                -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+              # Check if a PR already exists
+              EXISTING_PR=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
                 -H "Accept: application/vnd.github.v3+json" \
-                https://api.github.com/repos/$REPO/pulls \
-                -d "{\"title\":\"$PR_TITLE\",\"body\":\"$PR_BODY\",\"head\":\"dev\",\"base\":\"main\"}")
+                "https://api.github.com/repos/$REPO/pulls?head=$(echo $REPO | cut -d'/' -f1):dev&base=main&state=open")
               
-              PR_URL=$(echo $PR_RESPONSE | jq -r .html_url)
-              PR_NUMBER=$(echo $PR_RESPONSE | jq -r .number)
-              
-              if [[ "$PR_URL" != "null" ]]; then
-                echo "Created PR in $REPO: $PR_URL"
-                PR_URLS+=("$PR_URL")
-                PR_NUMBERS+=("$PR_NUMBER")
-                REPO_NAMES+=("$REPO")
+              # If PR exists, use it, otherwise create a new one
+              if [[ $(echo $EXISTING_PR | jq '. | length') -gt 0 ]]; then
+                PR_URL=$(echo $EXISTING_PR | jq -r '.[0].html_url')
+                PR_NUMBER=$(echo $EXISTING_PR | jq -r '.[0].number')
+                echo "Found existing PR in $REPO: $PR_URL"
               else
-                echo "Failed to create PR in $REPO. Response: $PR_RESPONSE"
-                exit 1
+                # Create a new pull request
+                PR_TITLE="Downstream merge from $CURRENT_REPO"
+                PR_BODY="This PR was automatically created by the stage-downstream workflow in $CURRENT_REPO. It merges changes from the dev branch of $CURRENT_REPO into the main branch of $REPO."
+                
+                PR_RESPONSE=$(curl -X POST \
+                  -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  https://api.github.com/repos/$REPO/pulls \
+                  -d "{\"title\":\"$PR_TITLE\",\"body\":\"$PR_BODY\",\"head\":\"dev\",\"base\":\"main\"}")
+                
+                PR_URL=$(echo $PR_RESPONSE | jq -r .html_url)
+                PR_NUMBER=$(echo $PR_RESPONSE | jq -r .number)
+                
+                if [[ "$PR_URL" == "null" ]]; then
+                  echo "Failed to create PR in $REPO. Response: $PR_RESPONSE"
+                  exit 1
+                fi
+                echo "Created new PR in $REPO: $PR_URL"
               fi
+              
+              # Add to our tracking arrays
+              PR_URLS+=("$PR_URL")
+              PR_NUMBERS+=("$PR_NUMBER")
+              REPO_NAMES+=("$REPO")
             else
               echo "Failed to merge $CURRENT_REPO/dev into $REPO/dev"
               exit 1
