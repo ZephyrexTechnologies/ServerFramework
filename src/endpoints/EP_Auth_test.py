@@ -5,9 +5,18 @@ import pytest
 from faker import Faker
 
 from AbstractTest import ParentEntity, TestToSkip
-from conftest import authorize_user
 from endpoints.AbstractEPTest import AbstractEndpointTest
 from lib.Environment import env
+
+
+def authorize_user(server, email: str, password="testpassword"):
+    credentials = f"{email}:{password}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    response = server.post(
+        "/v1/user/authorize", headers={"Authorization": f"Basic {encoded_credentials}"}
+    )
+    assert "token" in response.json(), "JWT token missing from authorization response."
+    return response.json()["token"]
 
 
 @pytest.mark.ep
