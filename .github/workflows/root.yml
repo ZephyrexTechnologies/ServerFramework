@@ -45,12 +45,9 @@ jobs:
     if: needs.determine-workflow.outputs.run_lint == 'true'
     uses: ./.github/workflows/lint.yml
 
-  # Only run tests if lint didn't auto-format code or if auto-formatting was done and this is a re-run
   test:
     needs: [determine-workflow, lint]
-    if: |
-      needs.determine-workflow.outputs.run_tests == 'true' && 
-      (needs.lint.outputs.auto_formatted != 'true' || github.run_attempt > 1)
+    if: needs.determine-workflow.outputs.run_tests == 'true'
     uses: ./.github/workflows/test-pytest-compare.yml
 
   stage-downstream:
