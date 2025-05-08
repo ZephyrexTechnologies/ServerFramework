@@ -132,8 +132,13 @@ jobs:
 
           # Save the PR URLs, numbers and repo names as outputs
           echo "downstream_prs=$(IFS=,; echo "${PR_URLS[*]}" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
-          echo "downstream_pr_numbers=$(IFS=,; echo "${PR_NUMBERS[*]}")" >> $GITHUB_OUTPUT
-          echo "downstream_repo_names=$(IFS=,; echo "${REPO_NAMES[*]}")" >> $GITHUB_OUTPUT
+
+          # Format PR numbers and repo names as arrays with proper quoting
+          PR_NUMBERS_JSON=$(printf '%s\n' "${PR_NUMBERS[@]}" | jq -R . | jq -s .)
+          REPO_NAMES_JSON=$(printf '%s\n' "${REPO_NAMES[@]}" | jq -R . | jq -s .)
+
+          echo "downstream_pr_numbers=$PR_NUMBERS_JSON" >> $GITHUB_OUTPUT
+          echo "downstream_repo_names=$REPO_NAMES_JSON" >> $GITHUB_OUTPUT
 
   check-downstream-prs:
     needs: [stage-downstream]
@@ -144,11 +149,19 @@ jobs:
 
       - name: Check downstream pull request status
         run: |
-          PR_NUMBERS="${{ needs.stage-downstream.outputs.downstream_pr_numbers }}"
-          REPO_NAMES="${{ needs.stage-downstream.outputs.downstream_repo_names }}"
+          PR_NUMBERS='${{ needs.stage-downstream.outputs.downstream_pr_numbers }}'
+          REPO_NAMES='${{ needs.stage-downstream.outputs.downstream_repo_names }}'
 
-          IFS=',' read -ra PR_ARRAY <<< "$PR_NUMBERS"
-          IFS=',' read -ra REPO_ARRAY <<< "$REPO_NAMES"
+          # Parse the JSON arrays
+          readarray -t PR_ARRAY < <(echo "$PR_NUMBERS" | jq -r '.[]')
+          readarray -t REPO_ARRAY < <(echo "$REPO_NAMES" | jq -r '.[]')
+
+          echo "Found ${#PR_ARRAY[@]} pull requests to check"
+
+          if [ ${#PR_ARRAY[@]} -eq 0 ] || [ ${#REPO_ARRAY[@]} -eq 0 ]; then
+            echo "::error::No pull requests or repositories found to check"
+            exit 1
+          fi
 
           for i in "${!PR_ARRAY[@]}"; do
             PR_NUMBER=${PR_ARRAY[$i]}
