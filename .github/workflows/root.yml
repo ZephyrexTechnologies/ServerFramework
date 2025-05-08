@@ -1,0 +1,64 @@
+name: CI Workflow
+
+on:
+  push:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+jobs:
+  determine-workflow:
+    runs-on: ubuntu-latest
+    outputs:
+      run_lint: ${{ steps.check-event.outputs.run_lint }}
+      run_tests: ${{ steps.check-event.outputs.run_tests }}
+      run_downstream: ${{ steps.check-event.outputs.run_downstream }}
+      is_from_dev: ${{ steps.check-event.outputs.is_from_dev }}
+    steps:
+      - name: Check event type
+        id: check-event
+        run: |
+          # Always run lint
+          echo "run_lint=true" >> $GITHUB_OUTPUT
+
+          # Run tests on pull requests to main or dev
+          if [[ "${{ github.event_name }}" == "pull_request" && ("${{ github.base_ref }}" == "main" || "${{ github.base_ref }}" == "dev") ]]; then
+            echo "run_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_tests=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if PR is from dev to main
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "main" && "${{ github.head_ref }}" == "dev" ]]; then
+            echo "run_downstream=true" >> $GITHUB_OUTPUT
+            echo "is_from_dev=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_downstream=false" >> $GITHUB_OUTPUT
+            echo "is_from_dev=false" >> $GITHUB_OUTPUT
+          fi
+
+  lint:
+    needs: determine-workflow
+    if: needs.determine-workflow.outputs.run_lint == 'true'
+    uses: ./.github/workflows/lint.yml
+
+  # Only run tests if lint didn't auto-format code or if auto-formatting was done and this is a re-run
+  test:
+    needs: [determine-workflow, lint]
+    if: |
+      needs.determine-workflow.outputs.run_tests == 'true' && 
+      (needs.lint.outputs.auto_formatted != 'true' || github.run_attempt > 1)
+    uses: ./.github/workflows/test-pytest-compare.yml
+
+  stage-downstream:
+    needs: [determine-workflow, test]
+    if: needs.determine-workflow.outputs.run_downstream == 'true'
+    uses: ./.github/workflows/stage-downstream.yml
+    with:
+      is_from_dev: ${{ needs.determine-workflow.outputs.is_from_dev == 'true' }}
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      DOWNSTREAM_REPOSITORIES: ${{ secrets.DOWNSTREAM_REPOSITORIES }}

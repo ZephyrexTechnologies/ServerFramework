@@ -1,36 +1,20 @@
 name: Stage Downstream Repositories
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
+  workflow_call:
+    inputs:
+      is_from_dev:
+        required: true
+        type: boolean
+    secrets:
+      PAT_TOKEN:
+        required: true
+      DOWNSTREAM_REPOSITORIES:
+        required: true
 
 jobs:
-  validate-pr-source:
-    runs-on: ubuntu-latest
-    outputs:
-      is_from_dev: ${{ steps.check_branch.outputs.is_from_dev }}
-    steps:
-      - name: Check source branch
-        id: check_branch
-        run: |
-          if [[ "${{ github.head_ref }}" == "dev" ]]; then
-            echo "is_from_dev=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_from_dev=false" >> $GITHUB_OUTPUT
-          fi
-
-  run-tests:
-    needs: validate-pr-source
-    if: needs.validate-pr-source.outputs.is_from_dev == 'true'
-    uses: ./.github/workflows/test-pytest-compare.yml
-
   stage-downstream:
-    needs: [validate-pr-source, run-tests]
-    if: needs.validate-pr-source.outputs.is_from_dev == 'true'
+    if: inputs.is_from_dev
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -38,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Configure Git
         run: |
@@ -150,9 +134,6 @@ jobs:
         with:
           name: pr-data
 
-      - name: Wait for PR checks (60s)
-        run: sleep 60
-
       - name: Check downstream pull request status
         run: |
           # Read PR data from file
@@ -166,6 +147,15 @@ jobs:
             exit 1
           fi
 
+          # Create arrays to store failed PRs for comprehensive reporting
+          FAILED_PRS=()
+          INCOMPLETE_CHECKS_PRS=()
+          UNMERGEABLE_PRS=()
+
+          # Initialization for retry logic
+          MAX_RETRIES=5
+          RETRY_DELAY=60 # seconds
+
           # Loop through each PR entry
           for PR_ENTRY in $PR_DATA; do
             # Split by colon
@@ -173,46 +163,97 @@ jobs:
             
             echo "Checking status of PR #$PR_NUMBER in repository $REPO"
             
-            # Get the PR status
-            PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
-            
-            # Get the PR checks
-            PR_SHA=$(echo $PR_STATUS | jq -r .head.sha)
-            PR_CHECKS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              https://api.github.com/repos/$REPO/commits/$PR_SHA/check-runs)
-            
-            TOTAL_CHECKS=$(echo $PR_CHECKS | jq '.total_count')
-            COMPLETED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.status == "completed")] | length')
-            FAILED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.conclusion != "success" and .conclusion != "neutral" and .status == "completed")] | length')
-            
-            echo "Total checks: $TOTAL_CHECKS"
-            echo "Completed checks: $COMPLETED_CHECKS"
-            echo "Failed checks: $FAILED_CHECKS"
-            
-            if [ "$FAILED_CHECKS" -gt 0 ]; then
-              echo "::error::PR #$PR_NUMBER in repository $REPO has failed checks"
-              exit 1
-            fi
-            
-            if [ "$COMPLETED_CHECKS" -lt "$TOTAL_CHECKS" ]; then
-              echo "::warning::Not all checks have completed for PR #$PR_NUMBER in repository $REPO"
-              exit 1
-            fi
-            
-            # Also check if PR is mergeable
-            MERGEABLE=$(echo $PR_STATUS | jq -r '.mergeable // "unknown"')
-            MERGEABLE_STATE=$(echo $PR_STATUS | jq -r '.mergeable_state // "unknown"')
-            
-            echo "Mergeable: $MERGEABLE"
-            echo "Mergeable state: $MERGEABLE_STATE"
-            
-            if [ "$MERGEABLE" = "false" ] || [ "$MERGEABLE_STATE" = "dirty" ] || [ "$MERGEABLE_STATE" = "blocked" ]; then
-              echo "::error::PR #$PR_NUMBER in repository $REPO is not mergeable (state: $MERGEABLE_STATE)"
-              exit 1
-            fi
+            for RETRY in $(seq 1 $MAX_RETRIES); do
+              echo "Attempt $RETRY of $MAX_RETRIES"
+              
+              # Get the PR status
+              PR_STATUS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                https://api.github.com/repos/$REPO/pulls/$PR_NUMBER)
+              
+              # Get the PR checks
+              PR_SHA=$(echo $PR_STATUS | jq -r .head.sha)
+              PR_CHECKS=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                https://api.github.com/repos/$REPO/commits/$PR_SHA/check-runs)
+              
+              TOTAL_CHECKS=$(echo $PR_CHECKS | jq '.total_count')
+              COMPLETED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.status == "completed")] | length')
+              FAILED_CHECKS=$(echo $PR_CHECKS | jq '[.check_runs[] | select(.conclusion != "success" and .conclusion != "neutral" and .status == "completed")] | length')
+              
+              echo "Total checks: $TOTAL_CHECKS"
+              echo "Completed checks: $COMPLETED_CHECKS"
+              echo "Failed checks: $FAILED_CHECKS"
+              
+              # Also check if PR is mergeable
+              MERGEABLE=$(echo $PR_STATUS | jq -r '.mergeable // "unknown"')
+              MERGEABLE_STATE=$(echo $PR_STATUS | jq -r '.mergeable_state // "unknown"')
+              
+              echo "Mergeable: $MERGEABLE"
+              echo "Mergeable state: $MERGEABLE_STATE"
+              
+              # Check for failures
+              FAILED=false
+              
+              if [ "$FAILED_CHECKS" -gt 0 ]; then
+                echo "::warning::PR #$PR_NUMBER in repository $REPO has failed checks"
+                FAILED_PRS+=("$REPO:$PR_NUMBER")
+                FAILED=true
+              fi
+              
+              if [ "$COMPLETED_CHECKS" -lt "$TOTAL_CHECKS" ]; then
+                if [ $RETRY -eq $MAX_RETRIES ]; then
+                  echo "::warning::Not all checks have completed for PR #$PR_NUMBER in repository $REPO after all retries"
+                  INCOMPLETE_CHECKS_PRS+=("$REPO:$PR_NUMBER")
+                  FAILED=true
+                else
+                  echo "Not all checks have completed. Will retry in $RETRY_DELAY seconds..."
+                  sleep $RETRY_DELAY
+                  continue # Try again
+                fi
+              fi
+              
+              if [ "$MERGEABLE" = "false" ] || [ "$MERGEABLE_STATE" = "dirty" ] || [ "$MERGEABLE_STATE" = "blocked" ]; then
+                echo "::warning::PR #$PR_NUMBER in repository $REPO is not mergeable (state: $MERGEABLE_STATE)"
+                UNMERGEABLE_PRS+=("$REPO:$PR_NUMBER")
+                FAILED=true
+              fi
+              
+              # If everything is okay or we've logged the issues, break out of retry loop
+              break
+            done
           done
 
-          echo "All downstream pull requests are passing and mergeable!"
+          # Comprehensive failure report
+          FAILURE=false
+
+          if [ ${#FAILED_PRS[@]} -gt 0 ]; then
+            echo "::error::The following PRs have failed checks:"
+            for PR in "${FAILED_PRS[@]}"; do
+              echo "  - $PR"
+            done
+            FAILURE=true
+          fi
+
+          if [ ${#INCOMPLETE_CHECKS_PRS[@]} -gt 0 ]; then
+            echo "::error::The following PRs have incomplete checks:"
+            for PR in "${INCOMPLETE_CHECKS_PRS[@]}"; do
+              echo "  - $PR"
+            done
+            FAILURE=true
+          fi
+
+          if [ ${#UNMERGEABLE_PRS[@]} -gt 0 ]; then
+            echo "::error::The following PRs are not mergeable:"
+            for PR in "${UNMERGEABLE_PRS[@]}"; do
+              echo "  - $PR"
+            done
+            FAILURE=true
+          fi
+
+          if [ "$FAILURE" = "true" ]; then
+            echo "::error::Some downstream pull requests have issues. See details above."
+            exit 1
+          else
+            echo "All downstream pull requests are passing and mergeable!"
+          fi

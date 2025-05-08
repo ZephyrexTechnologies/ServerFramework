@@ -1,16 +1,10 @@
 name: Compare Pytest Results
 
 on:
-  pull_request:
-    branches: [main, dev]
   workflow_call:
 
 jobs:
-  lint:
-    uses: ./.github/workflows/lint.yml
-
   test-pr-branch:
-    needs: lint
     runs-on: ubuntu-latest
     outputs:
       total: ${{ steps.extract-results.outputs.total }}
@@ -19,10 +13,10 @@ jobs:
 
     steps:
       - name: Checkout PR Branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5.3.0
         with:
           python-version: "3.10"
 
@@ -64,7 +58,6 @@ jobs:
           "
 
   test-main-branch:
-    needs: lint
     runs-on: ubuntu-latest
     outputs:
       total: ${{ steps.extract-results.outputs.total }}
@@ -73,12 +66,12 @@ jobs:
 
     steps:
       - name: Checkout main branch
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4.2.2
         with:
           ref: main
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5.3.0
         with:
           python-version: "3.10"
 
@@ -128,18 +121,20 @@ jobs:
           echo "Main branch: ${{ needs.test-main-branch.outputs.passed }}/${{ needs.test-main-branch.outputs.total }} tests passed (${{ needs.test-main-branch.outputs.percentage }}%)"
           echo "PR branch: ${{ needs.test-pr-branch.outputs.passed }}/${{ needs.test-pr-branch.outputs.total }} tests passed (${{ needs.test-pr-branch.outputs.percentage }}%)"
 
-          # Convert string outputs to numbers for comparison
-          PR_PASSED=${{ needs.test-pr-branch.outputs.passed }}
-          MAIN_PASSED=${{ needs.test-main-branch.outputs.passed }}
-          PR_PERCENTAGE=${{ needs.test-pr-branch.outputs.percentage }}
-          MAIN_PERCENTAGE=${{ needs.test-main-branch.outputs.percentage }}
+          # Use Python for comparison instead of bc
+          python -c "
+          import sys
+          pr_passed = float('${{ needs.test-pr-branch.outputs.passed }}')
+          main_passed = float('${{ needs.test-main-branch.outputs.passed }}')
+          pr_percentage = float('${{ needs.test-pr-branch.outputs.percentage }}')
+          main_percentage = float('${{ needs.test-main-branch.outputs.percentage }}')
 
-          if (( $(echo "$PR_PASSED >= $MAIN_PASSED" | bc -l) )) && (( $(echo "$PR_PERCENTAGE >= $MAIN_PERCENTAGE" | bc -l) )); then
-            echo "✅ PR branch has equal or better test results than main branch"
-            exit 0
-          else
-            echo "❌ PR branch has worse test results than main branch"
-            echo "  - Passed tests: $PR_PASSED vs $MAIN_PASSED on main"
-            echo "  - Pass percentage: $PR_PERCENTAGE% vs $MAIN_PERCENTAGE% on main"
-            exit 1
-          fi
+          if pr_passed >= main_passed and pr_percentage >= main_percentage:
+              print('✅ PR branch has equal or better test results than main branch')
+              sys.exit(0)
+          else:
+              print('❌ PR branch has worse test results than main branch')
+              print(f'  - Passed tests: {pr_passed} vs {main_passed} on main')
+              print(f'  - Pass percentage: {pr_percentage}% vs {main_percentage}% on main')
+              sys.exit(1)
+          "

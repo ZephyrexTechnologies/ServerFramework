@@ -1,19 +1,59 @@
 name: Lint
 on:
-  push:
   workflow_call:
+    outputs:
+      auto_formatted:
+        description: "Whether the workflow auto-formatted code"
+        value: ${{ jobs.lint.outputs.auto_formatted }}
+
 jobs:
   lint:
     runs-on: ubuntu-22.04
     name: Python Black Lint Check
+    outputs:
+      auto_formatted: ${{ steps.push-changes.outputs.pushed }}
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4.2.2
+        with:
+          token: ${{ github.token }}
+          fetch-depth: 0
+
       - name: Set up Python
         uses: actions/setup-python@v5.3.0
         with:
           python-version: "3.10"
+
       - name: Install Python dependencies
         run: pip install black nbqa
+
       - name: Run Black on Python files
-        run: black --check $(find . -type f -name "*.py")
+        id: black-check
+        continue-on-error: true
+        run: black --check .
+
+      - name: Auto-format with Black
+        if: steps.black-check.outcome == 'failure'
+        run: black .
+
+      - name: Configure Git
+        if: steps.black-check.outcome == 'failure'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes
+        id: push-changes
+        if: steps.black-check.outcome == 'failure'
+        run: |
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "pushed=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "style: auto-format Python code with black"
+            git push
+            echo "pushed=true" >> $GITHUB_OUTPUT
+          fi
