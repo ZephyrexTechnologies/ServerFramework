@@ -73,12 +73,18 @@ jobs:
           echo "Stderr:"
           cat pr_stderr.txt
 
-          # Check for collection errors
-          if grep -q "Interrupted: .* error during collection" pr_stderr.txt; then
+          # Check for collection errors - improved pattern matching
+          if grep -q "Interrupted:.* error during collection" pr_stderr.txt || grep -q "ERROR collecting" pr_stderr.txt; then
             echo "Collection errors found in PR branch!"
             echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            # Save error details for later
-            cat pr_stderr.txt > pr_errors.txt
+            # Extract the error details
+            if grep -q "ERROR collecting" pr_stderr.txt; then
+              # Extract import error details
+              grep -A 10 "ERROR collecting" pr_stderr.txt > pr_errors.txt
+            else
+              # Extract the standard collection error message
+              grep -A 2 "Interrupted:" pr_stderr.txt > pr_errors.txt
+            fi
           else
             echo "No collection errors found in PR branch"
             echo "has_collection_errors=false" >> $GITHUB_OUTPUT
@@ -86,10 +92,13 @@ jobs:
 
           # Check if JSON report was created
           if [ ! -f pr_results.json ]; then
-            echo "::error::No test results JSON file was created!"
+            echo "::warning::No test results JSON file was created!"
             echo '{"summary": {"total": 0, "passed": 0}}' > pr_results.json
-            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            echo "No tests were executed" > pr_errors.txt
+            # Only set collection errors if we didn't already find them
+            if [ "$(cat $GITHUB_OUTPUT | grep -c 'has_collection_errors')" -eq 0 ]; then
+              echo "has_collection_errors=true" >> $GITHUB_OUTPUT
+              echo "No tests were executed - JSON report was not created" > pr_errors.txt
+            fi
           fi
 
       - name: Extract test results
@@ -111,12 +120,17 @@ jobs:
               if os.path.exists('pr_errors.txt'):
                   with open('pr_errors.txt', 'r') as f:
                       error_text = f.read()
-                      # Extract the error summary line
-                      error_match = re.search(r'(Interrupted: .* error during collection)', error_text)
+                      # First try to extract the import error message
+                      error_match = re.search(r'ImportError: (.+)', error_text)
                       if error_match:
-                          error_message = error_match.group(1)
+                          error_message = f'Import error: {error_match.group(1)}'
                       else:
-                          error_message = 'Collection errors found in tests'
+                          # Fall back to checking for the interrupted pattern
+                          error_match = re.search(r'(Interrupted:.* error during collection)', error_text)
+                          if error_match:
+                              error_message = error_match.group(1)
+                          else:
+                              error_message = 'Collection errors found in tests'
 
           # Parse test results
           with open('pr_results.json') as f:
@@ -143,6 +157,17 @@ jobs:
               f.write(f'has_errors={str(has_errors).lower()}\\n')
               f.write(f'error_message={error_message}\\n')
           "
+
+      # Upload error logs as artifacts if collection errors were found
+      - name: Upload error logs
+        if: steps.run-tests.outputs.has_collection_errors == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-branch-error-logs
+          path: |
+            pr_errors.txt
+            pr_stderr.txt
+          retention-days: 5
 
   test-main-branch:
     runs-on: ubuntu-latest
@@ -215,12 +240,18 @@ jobs:
           echo "Stderr:"
           cat main_stderr.txt
 
-          # Check for collection errors
-          if grep -q "Interrupted: .* error during collection" main_stderr.txt; then
+          # Check for collection errors - improved pattern matching
+          if grep -q "Interrupted:.* error during collection" main_stderr.txt || grep -q "ERROR collecting" main_stderr.txt; then
             echo "Collection errors found in main branch!"
             echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            # Save error details for later
-            cat main_stderr.txt > main_errors.txt
+            # Extract the error details
+            if grep -q "ERROR collecting" main_stderr.txt; then
+              # Extract import error details
+              grep -A 10 "ERROR collecting" main_stderr.txt > main_errors.txt
+            else
+              # Extract the standard collection error message
+              grep -A 2 "Interrupted:" main_stderr.txt > main_errors.txt
+            fi
           else
             echo "No collection errors found in main branch"
             echo "has_collection_errors=false" >> $GITHUB_OUTPUT
@@ -228,10 +259,13 @@ jobs:
 
           # Check if JSON report was created
           if [ ! -f main_results.json ]; then
-            echo "::error::No test results JSON file was created!"
+            echo "::warning::No test results JSON file was created!"
             echo '{"summary": {"total": 0, "passed": 0}}' > main_results.json
-            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
-            echo "No tests were executed" > main_errors.txt
+            # Only set collection errors if we didn't already find them
+            if [ "$(cat $GITHUB_OUTPUT | grep -c 'has_collection_errors')" -eq 0 ]; then
+              echo "has_collection_errors=true" >> $GITHUB_OUTPUT
+              echo "No tests were executed - JSON report was not created" > main_errors.txt
+            fi
           fi
 
       - name: Extract test results
@@ -252,12 +286,17 @@ jobs:
               if os.path.exists('main_errors.txt'):
                   with open('main_errors.txt', 'r') as f:
                       error_text = f.read()
-                      # Extract the error summary line
-                      error_match = re.search(r'(Interrupted: .* error during collection)', error_text)
+                      # First try to extract the import error message
+                      error_match = re.search(r'ImportError: (.+)', error_text)
                       if error_match:
-                          error_message = error_match.group(1)
+                          error_message = f'Import error: {error_match.group(1)}'
                       else:
-                          error_message = 'Collection errors found in tests'
+                          # Fall back to checking for the interrupted pattern
+                          error_match = re.search(r'(Interrupted:.* error during collection)', error_text)
+                          if error_match:
+                              error_message = error_match.group(1)
+                          else:
+                              error_message = 'Collection errors found in tests'
 
           # Parse test results
           with open('main_results.json') as f:
@@ -284,6 +323,17 @@ jobs:
               f.write(f'has_errors={str(has_errors).lower()}\\n')
               f.write(f'error_message={error_message}\\n')
           "
+
+      # Upload error logs as artifacts if collection errors were found
+      - name: Upload error logs
+        if: steps.run-tests.outputs.has_collection_errors == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-branch-error-logs
+          path: |
+            main_errors.txt
+            main_stderr.txt
+          retention-days: 5
 
   compare-results:
     needs: [test-pr-branch, test-main-branch]
