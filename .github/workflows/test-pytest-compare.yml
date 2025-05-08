@@ -128,16 +128,31 @@ jobs:
           # Use Python for comparison instead of bc
           python -c "
           import sys
+          pr_total = float('${{ needs.test-pr-branch.outputs.total }}')
+          main_total = float('${{ needs.test-main-branch.outputs.total }}')
           pr_passed = float('${{ needs.test-pr-branch.outputs.passed }}')
           main_passed = float('${{ needs.test-main-branch.outputs.passed }}')
           pr_percentage = float('${{ needs.test-pr-branch.outputs.percentage }}')
           main_percentage = float('${{ needs.test-main-branch.outputs.percentage }}')
 
+          # First check if tests exist
+          if pr_total == 0:
+              print('⚠️ Warning: No tests were found in the PR branch!')
+              # If main branch has tests but PR doesn't, that's a failure
+              if main_total > 0:
+                  print(f'❌ Main branch has {main_total} tests but PR branch has none')
+                  sys.exit(1)
+              else:
+                  # Both have no tests, warn but don't fail
+                  print('⚠️ Neither branch has tests. This should be addressed!')
+                  sys.exit(0)
+
+          # Now we know the PR has tests, compare with main
           if pr_passed >= main_passed and pr_percentage >= main_percentage:
-              print('✅ PR branch has equal or better test results than main branch')
+              print(f'✅ PR branch has equal or better test results than main branch')
               sys.exit(0)
           else:
-              print('❌ PR branch has worse test results than main branch')
+              print(f'❌ PR branch has worse test results than main branch')
               print(f'  - Passed tests: {pr_passed} vs {main_passed} on main')
               print(f'  - Pass percentage: {pr_percentage}% vs {main_percentage}% on main')
               sys.exit(1)

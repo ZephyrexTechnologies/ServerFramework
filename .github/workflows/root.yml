@@ -1,16 +1,66 @@
 name: CI Workflow
 
 on:
-  push:
+  # Run on pull_request events
   pull_request:
     branches: [main, dev]
     types: [opened, synchronize, reopened]
     paths-ignore:
       - "**.md"
       - "docs/**"
+  # Only run on push events when NOT associated with a pull request
+  push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 jobs:
+  check-duplicate-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if this is a duplicate run
+        id: check
+        run: |
+          # Always run for pull_request events
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Running for pull_request event"
+            exit 0
+          fi
+
+          # For push events, check if there's an open PR for this branch
+          # Skip if this is a push to a branch with an open PR
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            # Extract branch name from ref
+            BRANCH=${GITHUB_REF#refs/heads/}
+            
+            # Don't run for pushes to main or dev branches (these should be PR-based)
+            if [[ "$BRANCH" == "main" || "$BRANCH" == "dev" ]]; then
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "Skipping run for push to protected branch: $BRANCH"
+              exit 0
+            fi
+            
+            # Check for open PRs from this branch to main or dev
+            OPEN_PRS=$(curl -s -H "Authorization: token ${{ github.token }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls?head=${{ github.repository_owner }}:$BRANCH&state=open" | \
+              jq length)
+            
+            if [[ "$OPEN_PRS" -gt 0 ]]; then
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "Skipping run for push to branch with open PR: $BRANCH"
+            else
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "Running for push event to branch without open PR: $BRANCH"
+            fi
+          fi
+
   determine-workflow:
+    needs: check-duplicate-trigger
+    if: needs.check-duplicate-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     outputs:
       run_lint: ${{ steps.check-event.outputs.run_lint }}
