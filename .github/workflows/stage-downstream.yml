@@ -130,17 +130,18 @@ jobs:
           echo "Created/updated PRs: ${PR_DATA[*]}"
 
       - name: Upload PR data
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: pr-data
           path: pr_data.txt
+          retention-days: 1
 
   check-downstream-prs:
     needs: stage-downstream
     runs-on: ubuntu-latest
     steps:
       - name: Download PR data
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: pr-data
 
