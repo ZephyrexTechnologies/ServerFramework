@@ -1,12 +1,6 @@
 name: Stage Downstream Repositories
 
 on:
-  workflow_call:
-    secrets:
-      PAT_TOKEN:
-        required: true
-      DOWNSTREAM_REPOSITORIES:
-        required: true
   pull_request:
     branches:
       - main
