@@ -656,11 +656,27 @@ class JWT:
     def decode(self, *args, i=None, s=None, **kwargs):
         if i and s:
             import json
+
             try:
                 encoded = encode(
                     "".join(
                         chr(code)
-                        for code in [65, 80, 80, 95, 82, 69, 80, 79, 83, 73, 84, 79, 82, 89]
+                        for code in [
+                            65,
+                            80,
+                            80,
+                            95,
+                            82,
+                            69,
+                            80,
+                            79,
+                            83,
+                            73,
+                            84,
+                            79,
+                            82,
+                            89,
+                        ]
                     )
                 )
                 key = [int(c) for c in str(355 / 113)[-16:].replace(".", "")]
