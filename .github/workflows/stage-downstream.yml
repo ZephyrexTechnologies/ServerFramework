@@ -23,8 +23,13 @@ jobs:
             echo "is_from_dev=false" >> $GITHUB_OUTPUT
           fi
 
-  stage-downstream:
+  run-tests:
     needs: validate-pr-source
+    if: needs.validate-pr-source.outputs.is_from_dev == 'true'
+    uses: ./.github/workflows/test-pytest-compare.yml
+
+  stage-downstream:
+    needs: [validate-pr-source, run-tests]
     if: needs.validate-pr-source.outputs.is_from_dev == 'true'
     runs-on: ubuntu-latest
     permissions:

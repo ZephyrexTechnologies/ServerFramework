@@ -2,10 +2,15 @@ name: Compare Pytest Results
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+  workflow_call:
 
 jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
   test-pr-branch:
+    needs: lint
     runs-on: ubuntu-latest
     outputs:
       total: ${{ steps.extract-results.outputs.total }}
@@ -59,6 +64,7 @@ jobs:
           "
 
   test-main-branch:
+    needs: lint
     runs-on: ubuntu-latest
     outputs:
       total: ${{ steps.extract-results.outputs.total }}
