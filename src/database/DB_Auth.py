@@ -76,18 +76,29 @@ class User(Base, BaseMixin, UpdateMixin, ImageMixin):
         comment="Whether this user account is active and allowed to log in",
     )
     # TODO #44 Get the base domain from APP_URI (no https, paths or subdomains).
+    import re
+
+    url = re.sub(r"^\w+://", "", env("APP_URI")) if env("APP_URI") else ""
+    hostname = url.split("/")[0] if url else ""
+    match = (
+        re.search(r"([^.]+\.(?:com|org|net|gov|edu|co\.\w{2}|[a-z]{2,}))$", hostname)
+        if hostname
+        else None
+    )
+    match = match.group(1) if match else hostname
+
     seed_list = [
         {
             "id": env("ROOT_ID"),
-            "email": f"root@{env('APP_URI')}",
+            "email": f"root@{match}",
         },
         {
             "id": env("SYSTEM_ID"),
-            "email": f"system@{env('APP_URI')}",
+            "email": f"system@{match}",
         },
         {
             "id": env("TEMPLATE_ID"),
-            "email": f"template@{env('APP_URI')}",
+            "email": f"template@{match}",
         },
     ]
 
