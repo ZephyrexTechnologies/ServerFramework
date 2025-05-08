@@ -58,9 +58,27 @@ jobs:
             fi
           fi
 
-  determine-workflow:
+  # New job to enforce that only PRs from dev can target main
+  enforce-branch-policy:
     needs: check-duplicate-trigger
-    if: needs.check-duplicate-trigger.outputs.should_run == 'true'
+    if: needs.check-duplicate-trigger.outputs.should_run == 'true' && github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if PR is from dev branch
+        run: |
+          if [[ "${{ github.head_ref }}" != "dev" ]]; then
+            echo "::error::Pull requests to main branch must come from dev branch only! Your PR is from ${{ github.head_ref }}."
+            echo "::error::Please target dev branch with this PR, or create a new PR from dev to main."
+            exit 1
+          fi
+          echo "✅ PR is correctly from dev to main"
+
+  determine-workflow:
+    needs: [check-duplicate-trigger, enforce-branch-policy]
+    if: |
+      needs.check-duplicate-trigger.outputs.should_run == 'true' && 
+      (github.event_name != 'pull_request' || github.base_ref != 'main' || 
+       (github.base_ref == 'main' && github.head_ref == 'dev'))
     runs-on: ubuntu-latest
     outputs:
       run_lint: ${{ steps.check-event.outputs.run_lint }}

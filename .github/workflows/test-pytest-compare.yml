@@ -28,11 +28,50 @@ jobs:
           pip install pytest pytest-json-report pytest-asyncio
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Discover test files
+        id: discover-tests
+        run: |
+          echo "Looking for test files in repository..."
+          TEST_FILES=$(find . -name "test_*.py" -o -name "*_test.py" | sort)
+          TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
+
+          if [ "$TEST_COUNT" -eq 0 ]; then
+            echo "::warning::No test files found with standard pytest naming patterns!"
+            echo "Looking for alternative test file patterns..."
+            ALT_TEST_FILES=$(find . -type f -name "*.py" | xargs grep -l "def test_" | sort)
+            ALT_TEST_COUNT=$(echo "$ALT_TEST_FILES" | wc -l)
+            
+            if [ "$ALT_TEST_COUNT" -eq 0 ]; then
+              echo "::error::No Python test files found in repository!"
+            else
+              echo "Found $ALT_TEST_COUNT Python files containing test functions:"
+              echo "$ALT_TEST_FILES"
+            fi
+          else
+            echo "Found $TEST_COUNT pytest files:"
+            echo "$TEST_FILES"
+          fi
+
+      - name: Show pytest collection
+        run: |
+          echo "Displaying test collection (without running tests):"
+          python -m pytest --collect-only -v || true
+
       - name: Run tests on PR Branch
         id: run-tests
         run: |
+          echo "Running pytest with verbose output first to diagnose any issues:"
+          python -m pytest -v --no-header --no-summary || true
+
+          echo "Now running with JSON report for results processing:"
           # Save both stdout and stderr to files
           python -m pytest -q --json-report --json-report-file=pr_results.json > pr_stdout.txt 2> pr_stderr.txt || true
+
+          # Debug output
+          echo "Test run complete. Stdout:"
+          cat pr_stdout.txt
+          echo "Stderr:"
+          cat pr_stderr.txt
 
           # Check for collection errors
           if grep -q "Interrupted: .* error during collection" pr_stderr.txt; then
@@ -43,6 +82,14 @@ jobs:
           else
             echo "No collection errors found in PR branch"
             echo "has_collection_errors=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if JSON report was created
+          if [ ! -f pr_results.json ]; then
+            echo "::error::No test results JSON file was created!"
+            echo '{"summary": {"total": 0, "passed": 0}}' > pr_results.json
+            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
+            echo "No tests were executed" > pr_errors.txt
           fi
 
       - name: Extract test results
@@ -123,11 +170,50 @@ jobs:
           pip install pytest pytest-json-report pytest-asyncio
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Discover test files
+        id: discover-tests
+        run: |
+          echo "Looking for test files in repository..."
+          TEST_FILES=$(find . -name "test_*.py" -o -name "*_test.py" | sort)
+          TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
+
+          if [ "$TEST_COUNT" -eq 0 ]; then
+            echo "::warning::No test files found with standard pytest naming patterns!"
+            echo "Looking for alternative test file patterns..."
+            ALT_TEST_FILES=$(find . -type f -name "*.py" | xargs grep -l "def test_" | sort)
+            ALT_TEST_COUNT=$(echo "$ALT_TEST_FILES" | wc -l)
+            
+            if [ "$ALT_TEST_COUNT" -eq 0 ]; then
+              echo "::error::No Python test files found in repository!"
+            else
+              echo "Found $ALT_TEST_COUNT Python files containing test functions:"
+              echo "$ALT_TEST_FILES"
+            fi
+          else
+            echo "Found $TEST_COUNT pytest files:"
+            echo "$TEST_FILES"
+          fi
+
+      - name: Show pytest collection
+        run: |
+          echo "Displaying test collection (without running tests):"
+          python -m pytest --collect-only -v || true
+
       - name: Run tests on main branch
         id: run-tests
         run: |
+          echo "Running pytest with verbose output first to diagnose any issues:"
+          python -m pytest -v --no-header --no-summary || true
+
+          echo "Now running with JSON report for results processing:"
           # Save both stdout and stderr to files
           python -m pytest -q --json-report --json-report-file=main_results.json > main_stdout.txt 2> main_stderr.txt || true
+
+          # Debug output
+          echo "Test run complete. Stdout:"
+          cat main_stdout.txt
+          echo "Stderr:"
+          cat main_stderr.txt
 
           # Check for collection errors
           if grep -q "Interrupted: .* error during collection" main_stderr.txt; then
@@ -138,6 +224,14 @@ jobs:
           else
             echo "No collection errors found in main branch"
             echo "has_collection_errors=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if JSON report was created
+          if [ ! -f main_results.json ]; then
+            echo "::error::No test results JSON file was created!"
+            echo '{"summary": {"total": 0, "passed": 0}}' > main_results.json
+            echo "has_collection_errors=true" >> $GITHUB_OUTPUT
+            echo "No tests were executed" > main_errors.txt
           fi
 
       - name: Extract test results
